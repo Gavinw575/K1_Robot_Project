@@ -63,6 +63,12 @@ def robot_speak(text):
 
 
 def record_robot_mic(stop_event):
+    # Stop PulseAudio if it's running and holding the mic (no-op if already stopped)
+    subprocess.run(
+        f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
+        f'{ROBOT_USER}@{ROBOT_IP} "systemctl --user stop pulseaudio 2>/dev/null; true"',
+        shell=True, capture_output=True
+    )
     proc = subprocess.Popen(
         f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
         f'{ROBOT_USER}@{ROBOT_IP} '
@@ -278,8 +284,12 @@ class K1VoiceGUI:
             fname = f.name
 
         mono = fname.replace(".wav", "_mono.wav")
+        # Mix only front 3 channels (FL/FR/FC), skip LFE/SL/SR which carry motor noise.
+        # High-pass at 200Hz removes low-frequency rumble that Whisper reads as Japanese.
         subprocess.run(
-            f"ffmpeg -i {fname} -ac 1 -ar 16000 {mono} -y -loglevel quiet",
+            f'ffmpeg -i {fname} '
+            f'-af "pan=mono|c0=0.333*c0+0.333*c1+0.333*c2,highpass=f=200" '
+            f'-ar 16000 {mono} -y -loglevel quiet',
             shell=True
         )
 
