@@ -24,7 +24,6 @@ ROBOT_PASS    = "123456"
 ROBOT_SPEAKER = "alsa_output.usb-C-Media_Electronics_Inc._USB_Audio_Device-00.analog-stereo"
 MIC_DEVICE    = None       # None = system default (laptop mic)
 SAMPLE_RATE   = 16000
-RECORD_SECS   = 5
 WHISPER_MODEL = "base"
 USE_ROBOT_MIC = True       # True = robot mic via SSH, False = laptop mic
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,21 +60,40 @@ def robot_speak(text):
     subprocess.Popen(ssh_cmd, shell=True)
 
 
-def record_robot_mic():
-    cmd = (
+def record_robot_mic(stop_event):
+    proc = subprocess.Popen(
         f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
         f'{ROBOT_USER}@{ROBOT_IP} '
-        f'"arecord -D plughw:1,0 -f S16_LE -r 16000 -c 6 -d {RECORD_SECS} --quiet /tmp/rec.wav && '
-        f'cat /tmp/rec.wav"'
+        f'"arecord -D plughw:1,0 -f S16_LE -r 16000 -c 6 --quiet /tmp/rec.wav"',
+        shell=True
     )
-    result = subprocess.run(cmd, shell=True, capture_output=True)
+    stop_event.wait()
+    subprocess.run(
+        f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
+        f'{ROBOT_USER}@{ROBOT_IP} "pkill -INT arecord"',
+        shell=True
+    )
+    proc.wait()
+    time.sleep(0.3)
+    result = subprocess.run(
+        f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
+        f'{ROBOT_USER}@{ROBOT_IP} "cat /tmp/rec.wav"',
+        shell=True, capture_output=True
+    )
     return result.stdout
 
 
-def record_laptop_mic():
-    audio = sd.rec(int(RECORD_SECS * SAMPLE_RATE), samplerate=SAMPLE_RATE,
-                   channels=1, dtype='int16', device=MIC_DEVICE)
-    sd.wait()
+def record_laptop_mic(stop_event):
+    chunks = []
+
+    def callback(indata, frames, time_info, status):
+        chunks.append(indata.copy())
+
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype='int16',
+                        device=MIC_DEVICE, callback=callback):
+        stop_event.wait()
+
+    audio = np.concatenate(chunks, axis=0)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wav.write(f.name, SAMPLE_RATE, audio)
         return open(f.name, 'rb').read()
@@ -90,6 +108,7 @@ class K1VoiceGUI:
         self.root.resizable(False, False)
 
         self.recording = False
+        self.stop_event = None
         self.whisper_model = None
         self.groq_client = None
         self.ready = False
@@ -130,8 +149,9 @@ class K1VoiceGUI:
             padx=30, pady=14,
             cursor="hand2",
             state=tk.DISABLED,
-            command=self._on_record_click
         )
+        self.record_btn.bind("<ButtonPress-1>", self._on_press)
+        self.record_btn.bind("<ButtonRelease-1>", self._on_release)
         self.record_btn.pack()
 
         # Mic source toggle
@@ -216,25 +236,30 @@ class K1VoiceGUI:
         self.record_btn.config(state=tk.NORMAL)
         self._set_status("Ready — press the button to speak", "#00d4ff")
 
-    def _on_record_click(self):
+    def _on_press(self, event):
         if not self.ready or self.recording:
             return
+        self.stop_event = threading.Event()
         threading.Thread(target=self._run_pipeline, daemon=True).start()
+
+    def _on_release(self, event):
+        if self.stop_event:
+            self.stop_event.set()
 
     def _run_pipeline(self):
         self.recording = True
         self.root.after(0, lambda: self.record_btn.config(
             state=tk.DISABLED, text="⏺  RECORDING...", bg="#ff4466"))
         self.root.after(0, lambda: self._set_status(
-            f"Recording for {RECORD_SECS}s...", "#ff4466"))
+            "Recording... (release to stop)", "#ff4466"))
 
         # Record
         if self.use_robot_mic:
             self._log("Recording from robot mic...")
-            audio_bytes = record_robot_mic()
+            audio_bytes = record_robot_mic(self.stop_event)
         else:
             self._log("Recording from laptop mic...")
-            audio_bytes = record_laptop_mic()
+            audio_bytes = record_laptop_mic(self.stop_event)
 
         if len(audio_bytes) < 1000:
             self._log("⚠ No audio captured.")
