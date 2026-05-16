@@ -3,6 +3,8 @@
 #!/usr/bin/env python3
 """K1 Voice Command System — GUI version"""
 import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import sys
 import tempfile
 import subprocess
@@ -214,10 +216,12 @@ class K1VoiceGUI:
         self.mic_var.set("🤖 Robot Mic" if self.use_robot_mic else "💻 Laptop Mic")
 
     def _log(self, msg):
-        self.log.config(state=tk.NORMAL)
-        self.log.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        self.log.see(tk.END)
-        self.log.config(state=tk.DISABLED)
+        def _do():
+            self.log.config(state=tk.NORMAL)
+            self.log.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+            self.log.see(tk.END)
+            self.log.config(state=tk.DISABLED)
+        self.root.after(0, _do)
 
     def _set_status(self, msg, color="#888888"):
         self.status_var.set(msg)
