@@ -7,10 +7,52 @@ Hold the button to speak, release to send. Say "what do you see?" for vision.
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+# ── Dependency bootstrap (runs before third-party imports) ───────────────────
+import sys
+import shutil
+import subprocess
+
+def _can_import(module):
+    try:
+        __import__(module)
+        return True
+    except ImportError:
+        return False
+
+def _ensure_pip_deps():
+    deps = [
+        ("groq",        "groq"),
+        ("whisper",     "openai-whisper"),
+        ("sounddevice", "sounddevice"),
+        ("scipy",       "scipy"),
+        ("numpy",       "numpy"),
+        ("PIL",         "Pillow"),
+    ]
+    missing = [pkg for mod, pkg in deps if not _can_import(mod)]
+    if missing:
+        print(f"[k1] Installing missing packages: {', '.join(missing)} ...")
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--quiet"] + missing
+            )
+            print("[k1] Packages ready.")
+        except subprocess.CalledProcessError as e:
+            print(f"[k1] pip install failed: {e}")
+
+def _warn_system_deps():
+    missing = [t for t in ("sshpass", "ffmpeg", "espeak-ng") if not shutil.which(t)]
+    if missing:
+        print(f"\n[k1] Missing system tools — install with:")
+        print(f"     sudo apt install {' '.join(missing)}\n")
+
+_ensure_pip_deps()
+_warn_system_deps()
+# ─────────────────────────────────────────────────────────────────────────────
+
 import base64
 import re
 import tempfile
-import subprocess
 import threading
 import time
 import io
@@ -191,6 +233,7 @@ class K1VoiceGUI:
         self._build_ui()
         threading.Thread(target=self._load_models, daemon=True).start()
         threading.Thread(target=self._prepare_robot_audio, daemon=True).start()
+        threading.Thread(target=self._start_camera_bridge, daemon=True).start()
 
     def _build_ui(self):
         title_frame = tk.Frame(self.root, bg="#0a0f1e")
@@ -347,6 +390,23 @@ class K1VoiceGUI:
             shell=True, capture_output=True
         )
         self._log("Robot mic ready.")
+
+    def _start_camera_bridge(self):
+        self._log("Starting camera bridge on robot...")
+        # Uses a list to avoid shell quoting issues with the inner bash -c '...'
+        subprocess.run([
+            "sshpass", f"-p{ROBOT_PASS}",
+            "ssh", "-o", "StrictHostKeyChecking=no",
+            f"{ROBOT_USER}@{ROBOT_IP}",
+            (
+                "pgrep -f robot_video_bridge.py >/dev/null 2>&1 || "
+                "nohup bash -c 'source /opt/ros/humble/setup.bash && "
+                "python3 ~/robot_video_bridge.py "
+                "--topic /booster_video_stream --port 8080' "
+                ">/tmp/video_bridge.log 2>&1 &"
+            ),
+        ], capture_output=True)
+        self._log("Camera bridge ready.")
 
     def _load_models(self):
         self._log(f"Loading Whisper ({WHISPER_MODEL})...")
