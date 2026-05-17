@@ -1,6 +1,6 @@
 # K1 Robot — Custom Voice + Vision Control
 
-**Hardware:** Booster K1 humanoid | Firmware V1.6+ | SN 01022026030030  
+**Hardware:** Booster K1 humanoid | Firmware V1.6+ |  
 **Laptop:** Ubuntu 22.04, i7 9th gen, GTX 1650 Mobile  
 **Network:** Laptop `192.168.10.100` ↔ Robot `192.168.10.102` (ethernet)
 
