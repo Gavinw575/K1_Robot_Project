@@ -63,10 +63,13 @@ def robot_speak(text):
 
 
 def record_robot_mic(stop_event):
-    # Stop PulseAudio if it's running and holding the mic (no-op if already stopped)
+    # Safety net: free the mic in case PulseAudio or booster-audio restarted
     subprocess.run(
         f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
-        f'{ROBOT_USER}@{ROBOT_IP} "systemctl --user stop pulseaudio 2>/dev/null; true"',
+        f'{ROBOT_USER}@{ROBOT_IP} '
+        f'"systemctl --user stop pulseaudio 2>/dev/null; '
+        f'pkill -x pulseaudio 2>/dev/null; '
+        f'pkill -x booster-audio 2>/dev/null; true"',
         shell=True, capture_output=True
     )
     proc = subprocess.Popen(
@@ -123,6 +126,7 @@ class K1VoiceGUI:
 
         self._build_ui()
         threading.Thread(target=self._load_models, daemon=True).start()
+        threading.Thread(target=self._prepare_robot_audio, daemon=True).start()
 
     def _build_ui(self):
         # Title
@@ -232,6 +236,21 @@ class K1VoiceGUI:
     def _set_status(self, msg, color="#888888"):
         self.status_var.set(msg)
         self.status_label.config(fg=color)
+
+    def _prepare_robot_audio(self):
+        """Runs once at startup: permanently mask PulseAudio and free the mic."""
+        self._log("Freeing robot mic (stopping PulseAudio + booster-audio)...")
+        subprocess.run(
+            f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
+            f'{ROBOT_USER}@{ROBOT_IP} '
+            f'"systemctl --user mask pulseaudio 2>/dev/null; '
+            f'systemctl --user stop pulseaudio 2>/dev/null; '
+            f'pkill -x pulseaudio 2>/dev/null; '
+            f'pkill -x booster-audio 2>/dev/null; '
+            f'true"',
+            shell=True, capture_output=True
+        )
+        self._log("Robot mic ready.")
 
     def _load_models(self):
         self._log(f"Loading Whisper ({WHISPER_MODEL})...")
