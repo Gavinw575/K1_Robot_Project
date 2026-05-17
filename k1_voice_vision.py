@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""K1 Voice Command System — with vision (what do you see?) support"""
+"""
+K1 Robot — Voice + Vision Control
+Run: python3 k1_voice_vision.py
+Hold the button to speak, release to send. Say "what do you see?" for vision.
+"""
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import base64
 import re
-import sys
 import tempfile
 import subprocess
 import threading
@@ -80,7 +83,7 @@ def is_vision_query(transcript: str) -> bool:
     return bool(_VISION_PATTERNS.search(transcript))
 
 
-def fetch_camera_frame() -> str | None:
+def fetch_camera_frame() -> "str | None":
     """Fetch a JPEG from the camera bridge and return it as a base64 string."""
     try:
         with urllib.request.urlopen(CAMERA_URL, timeout=CAMERA_TIMEOUT) as resp:
