@@ -178,7 +178,7 @@ class K1VoiceGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("K1 Robot Voice Control")
-        self.root.geometry("700x600")
+        self.root.geometry("700x680")
         self.root.configure(bg="#0a0f1e")
         self.root.resizable(False, False)
 
@@ -212,8 +212,12 @@ class K1VoiceGUI:
         btn_frame = tk.Frame(self.root, bg="#0a0f1e")
         btn_frame.pack(pady=20)
 
+        # Record + Stop side by side
+        row = tk.Frame(btn_frame, bg="#0a0f1e")
+        row.pack()
+
         self.record_btn = tk.Button(
-            btn_frame,
+            row,
             text="⏺  HOLD TO SPEAK",
             font=("Courier", 14, "bold"),
             fg="#0a0f1e", bg="#00d4ff",
@@ -225,8 +229,22 @@ class K1VoiceGUI:
         )
         self.record_btn.bind("<ButtonPress-1>", self._on_press)
         self.record_btn.bind("<ButtonRelease-1>", self._on_release)
-        self.record_btn.pack()
+        self.record_btn.pack(side=tk.LEFT, padx=(0, 8))
 
+        self.stop_btn = tk.Button(
+            row,
+            text="■  STOP",
+            font=("Courier", 14, "bold"),
+            fg="#ffffff", bg="#cc2244",
+            activebackground="#aa1133",
+            relief=tk.FLAT,
+            padx=20, pady=14,
+            cursor="hand2",
+            command=self._on_stop,
+        )
+        self.stop_btn.pack(side=tk.LEFT)
+
+        # Mic source toggle
         self.mic_var = tk.StringVar(value="🤖 Robot Mic" if USE_ROBOT_MIC else "💻 Laptop Mic")
         self.mic_btn = tk.Button(
             btn_frame,
@@ -240,6 +258,29 @@ class K1VoiceGUI:
             command=self._toggle_mic
         )
         self.mic_btn.pack(pady=(8, 0))
+
+        # Volume slider
+        vol_frame = tk.Frame(btn_frame, bg="#0a0f1e")
+        vol_frame.pack(pady=(10, 0), fill=tk.X, padx=20)
+
+        tk.Label(vol_frame, text="SPEAKER VOLUME", font=("Courier", 8),
+                 fg="#444466", bg="#0a0f1e").pack(anchor=tk.W)
+
+        self.volume_var = tk.IntVar(value=80)
+        vol_scale = tk.Scale(
+            vol_frame,
+            from_=0, to=100,
+            orient=tk.HORIZONTAL,
+            variable=self.volume_var,
+            font=("Courier", 8),
+            fg="#888888", bg="#131929",
+            troughcolor="#0a0f1e",
+            highlightthickness=0,
+            bd=0,
+            length=300,
+        )
+        vol_scale.bind("<ButtonRelease-1>", self._on_volume_change)
+        vol_scale.pack()
 
         self.use_robot_mic = USE_ROBOT_MIC
 
@@ -375,6 +416,12 @@ class K1VoiceGUI:
         self._log(f'You said: "{transcript}"')
         self.root.after(0, lambda: self.transcript_var.set(f'"{transcript}"'))
 
+        # ── Fast-path stop — skip Groq roundtrip ─────────────────────────────
+        if re.fullmatch(r'(please\s+)?(robot[,\s]+)?stop[\s!.]*', transcript.strip(), re.IGNORECASE):
+            self._on_stop()
+            self._reset_btn()
+            return
+
         # ── Vision path ───────────────────────────────────────────────────────
         if is_vision_query(transcript):
             self.root.after(0, lambda: self._set_status("Looking...", "#dd88ff"))
@@ -428,6 +475,33 @@ class K1VoiceGUI:
             self.root.after(0, lambda: self._set_status("Ready", "#00d4ff"))
 
         self._reset_btn()
+
+    def _on_stop(self):
+        self._log("STOP command triggered.")
+        self.root.after(0, lambda: self._set_status("Stopping...", "#ff4466"))
+        self.root.after(0, lambda: self.response_var.set("■ STOP"))
+        self.root.after(0, lambda: self.response_label.config(fg="#ff4466"))
+        threading.Thread(target=self._send_stop, daemon=True).start()
+
+    def _send_stop(self):
+        robot_speak("Stopping")
+        # Wire B1LocoClient.Stop() here when motion pipeline is connected
+        self.root.after(0, lambda: self._set_status("Ready", "#00d4ff"))
+
+    def _on_volume_change(self, event=None):
+        vol = self.volume_var.get()
+        threading.Thread(target=self._set_robot_volume, args=(vol,), daemon=True).start()
+
+    def _set_robot_volume(self, percent):
+        subprocess.run(
+            f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
+            f'{ROBOT_USER}@{ROBOT_IP} '
+            f'"amixer -c 0 set Speaker {percent}% 2>/dev/null || '
+            f'amixer -c 0 set PCM {percent}% 2>/dev/null || '
+            f'amixer -c 0 set Master {percent}% 2>/dev/null"',
+            shell=True, capture_output=True
+        )
+        self._log(f"Volume → {percent}%")
 
     def _show_camera_popup(self, b64_image: str):
         if not PIL_AVAILABLE:
