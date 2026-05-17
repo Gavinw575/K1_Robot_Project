@@ -243,8 +243,7 @@ class K1VoiceGUI:
         subprocess.run(
             f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
             f'{ROBOT_USER}@{ROBOT_IP} '
-            f'"systemctl --user mask pulseaudio 2>/dev/null; '
-            f'systemctl --user stop pulseaudio 2>/dev/null; '
+            f'"systemctl --user stop pulseaudio 2>/dev/null; '
             f'pkill -x pulseaudio 2>/dev/null; '
             f'pkill -x booster-audio 2>/dev/null; '
             f'true"',
