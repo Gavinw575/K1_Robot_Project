@@ -10,9 +10,15 @@ import tempfile
 import subprocess
 import threading
 import time
+import io
 import urllib.request
 import tkinter as tk
 from tkinter import scrolledtext
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
@@ -88,6 +94,10 @@ def ask_vision_model(groq_client: Groq, transcript: str, b64_image: str) -> str:
         model=VISION_MODEL,
         messages=[
             {
+                "role": "system",
+                "content": "You are a robot's vision system. Answer in 1-2 sentences, clearly and concisely.",
+            },
+            {
                 "role": "user",
                 "content": [
                     {
@@ -96,9 +106,9 @@ def ask_vision_model(groq_client: Groq, transcript: str, b64_image: str) -> str:
                     },
                     {"type": "text", "text": transcript},
                 ],
-            }
+            },
         ],
-        max_tokens=200,
+        max_tokens=80,
     ).choices[0].message.content.strip()
 
 
@@ -373,6 +383,7 @@ class K1VoiceGUI:
                 self._log("⚠ Camera fetch failed — bridge may not be running.")
             else:
                 self._log(f"Frame captured ({CAMERA_URL}), asking vision model...")
+                self._show_camera_popup(b64)
                 self.root.after(0, lambda: self._set_status("Asking vision model...", "#dd88ff"))
                 reply = ask_vision_model(self.groq_client, transcript, b64)
             self._log(f"→ Vision reply: {reply}")
@@ -414,6 +425,35 @@ class K1VoiceGUI:
             self.root.after(0, lambda: self._set_status("Ready", "#00d4ff"))
 
         self._reset_btn()
+
+    def _show_camera_popup(self, b64_image: str):
+        if not PIL_AVAILABLE:
+            self._log("⚠ Pillow not installed — skipping camera popup (pip install Pillow)")
+            return
+
+        def _do():
+            img = Image.open(io.BytesIO(base64.b64decode(b64_image)))
+            img.thumbnail((480, 320))
+
+            popup = tk.Toplevel(self.root)
+            popup.title("What the robot sees")
+            popup.configure(bg="#0a0f1e")
+            popup.resizable(False, False)
+
+            photo = ImageTk.PhotoImage(img)
+            lbl = tk.Label(popup, image=photo, bg="#0a0f1e")
+            lbl.image = photo  # prevent garbage collection
+            lbl.pack(padx=10, pady=10)
+
+            tk.Button(
+                popup, text="Close", command=popup.destroy,
+                font=("Courier", 10, "bold"),
+                fg="#0a0f1e", bg="#00d4ff",
+                activebackground="#00a8cc",
+                relief=tk.FLAT, padx=20, pady=8
+            ).pack(pady=(0, 10))
+
+        self.root.after(0, _do)
 
     def _reset_btn(self):
         self.recording = False
