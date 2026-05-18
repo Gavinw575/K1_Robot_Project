@@ -35,7 +35,7 @@ Whisper (local STT, laptop GPU)
 **1. Install dependencies (laptop)**
 ```bash
 sudo apt install portaudio19-dev ffmpeg sshpass espeak-ng
-pip install sounddevice scipy numpy openai-whisper groq Pillow
+pip install sounddevice numpy openai-whisper groq Pillow
 ```
 
 **2. Start the camera bridge on the robot** *(needed for vision queries)*

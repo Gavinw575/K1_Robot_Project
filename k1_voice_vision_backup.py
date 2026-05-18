@@ -124,23 +124,6 @@ def is_vision_query(transcript: str) -> bool:
     return bool(_VISION_PATTERNS.search(transcript))
 
 
-# Navigation commands that refer to a real-world object — need camera to identify target.
-# Excluded: pure directional words (left/right/forward/back/straight/ahead).
-_NAV_OBJECT_PATTERNS = re.compile(
-    r'\b(?:walk|go|move|navigate|get|head|travel|come|follow)\s+'
-    r'(?:to|toward[s]?|near|up\s+to|close\s+to)\s+'
-    r'(?!(?:the\s+)?(?:left|right|front|back(?:wards?)?|forward|straight|ahead)\b)'
-    r'(?:the|a|an|that|this|those|these|my|your)?\s*\w'
-    r'|\bapproach\s+(?:the|a|an|that|this|those|these)\s+\w'
-    r'|\bfollow\s+(?:the|a|an|that|this|those|these|me)\b',
-    re.IGNORECASE,
-)
-
-
-def is_nav_object_command(transcript: str) -> bool:
-    return bool(_NAV_OBJECT_PATTERNS.search(transcript))
-
-
 def fetch_camera_frame() -> "str | None":
     """Fetch a JPEG from the camera bridge and return it as a base64 string."""
     try:
@@ -171,43 +154,6 @@ def ask_vision_model(groq_client: Groq, transcript: str, b64_image: str) -> str:
         ],
         max_tokens=80,
     ).choices[0].message.content.strip()
-
-
-def ask_nav_vision_model(groq_client: Groq, transcript: str, b64_image: str) -> str:
-    """Use the vision model to resolve the nav target and return a clean command string."""
-    resp = groq_client.chat.completions.create(
-        model=VISION_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a navigation command interpreter for a humanoid robot. "
-                    "The user wants the robot to navigate to a specific object. "
-                    "Look at the image and the user's instruction. Identify the exact "
-                    "object in the image the user is referring to. "
-                    "Respond with exactly one line in this format:\n"
-                    "COMMAND: walk to the <object>\n"
-                    "Use the real name of the object you see. "
-                    "No explanation, no punctuation after — only that one line."
-                ),
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
-                    },
-                    {"type": "text", "text": f"User said: {transcript}"},
-                ],
-            },
-        ],
-        max_tokens=30,
-    ).choices[0].message.content.strip()
-
-    if resp.upper().startswith("COMMAND:"):
-        return resp.split(":", 1)[1].strip()
-    return resp
 
 
 def robot_speak(text):
@@ -562,28 +508,6 @@ class K1VoiceGUI:
             self._reset_btn()
             return
 
-        # ── Navigation-to-object path (camera identifies the target) ─────────
-        if is_nav_object_command(transcript):
-            self.root.after(0, lambda: self._set_status("Identifying target...", "#773399"))
-            self.root.after(0, lambda: self.response_label.config(fg="#773399"))
-            self._log("Nav-object command — fetching camera frame to identify target...")
-            b64 = fetch_camera_frame()
-            if b64 is None:
-                self._log("⚠ Camera unavailable — falling back to raw transcript.")
-                print("WARNING: camera unavailable, using raw transcript as command")
-                cmd = transcript
-            else:
-                self._log("Frame captured, asking vision model to identify target...")
-                cmd = ask_nav_vision_model(self.groq_client, transcript, b64)
-            print(f"ROBOT COMMAND: {cmd}")
-            self._log(f"→ Nav command: {cmd}")
-            self.root.after(0, lambda: self.response_var.set(f"🚀 COMMAND: {cmd}"))
-            self.root.after(0, lambda: self.response_label.config(fg="#006633"))
-            robot_speak(f"Executing: {cmd}")
-            self.root.after(0, lambda: self._set_status("Command sent!", "#006633"))
-            self._reset_btn()
-            return
-
         # ── Text / command path ───────────────────────────────────────────────
         self.root.after(0, lambda: self._set_status("Thinking...", "#5544bb"))
         response = self.groq_client.chat.completions.create(
@@ -599,7 +523,6 @@ class K1VoiceGUI:
 
         if response.startswith("COMMAND:"):
             cmd = response.split("COMMAND:", 1)[1].strip()
-            print(f"ROBOT COMMAND: {cmd}")
             self.root.after(0, lambda: self.response_var.set(f"🚀 COMMAND: {cmd}"))
             self.root.after(0, lambda: self.response_label.config(fg="#006633"))
             self._log(f"→ Robot command: {cmd}")
