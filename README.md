@@ -38,19 +38,28 @@ sudo apt install portaudio19-dev ffmpeg sshpass espeak-ng
 pip install sounddevice numpy openai-whisper groq Pillow
 ```
 
-**2. Start the camera bridge on the robot** *(needed for vision queries)*
+For YOLO detection only:
 ```bash
-ssh booster@192.168.10.102
-source /opt/ros/humble/setup.bash
-python3 ~/robot_video_bridge.py --topic /booster_video_stream --port 8080
+pip install opencv-python numpy ultralytics
 ```
 
-**3. Run the app (laptop)**
+**2. Add your Groq API key**
+
+Edit the `GROQ_API_KEY` line at the top of `k1_voice_vision.py` — get a free key at [console.groq.com](https://console.groq.com).
+
+**3. Run the voice + vision app (laptop)**
 ```bash
 python3 ~/k1-voice-control/k1_voice_vision.py
 ```
 
-On launch the app automatically frees the robot mic (stops PulseAudio and booster-audio via SSH). Hold the button to speak, release to send.
+On launch the app automatically frees the robot mic (stops PulseAudio and booster-audio via SSH) and starts the camera bridge on the robot. Hold the button to speak, release to send.
+
+**Run YOLO live detection (laptop, separate terminal)**
+```bash
+python3 ~/k1-voice-control/yolo_detect.py
+```
+
+The camera bridge is started automatically. Press **Q** in the window to quit. Model (`yolov8n.pt`) is downloaded automatically on first run.
 
 ---
 
@@ -58,7 +67,9 @@ On launch the app automatically frees the robot mic (stops PulseAudio and booste
 
 | File | Purpose |
 |------|---------|
-| `k1_voice_vision.py` | **Main app** — voice + vision, hold-to-record GUI |
+| `k1_voice_vision.py` | **Main app** — voice + vision + nav-object routing, hold-to-record GUI |
+| `yolo_detect.py` | **Live YOLO detection** — real-time object detection on the robot camera feed |
+| `k1_voice_vision_backup.py` | Backup of the main app before nav-object changes |
 | `k1_voice.py` | Original voice-only version (no vision) |
 | `K1_VOICE_SETUP.txt` | Full robot setup notes and architecture reference |
 

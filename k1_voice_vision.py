@@ -40,7 +40,7 @@ def _ensure_pip_deps():
             print(f"[k1] pip install failed: {e}")
 
 def _warn_system_deps():
-    missing = [t for t in ("sshpass", "ffmpeg", "espeak-ng") if not shutil.which(t)]
+    missing = [t for t in ("sshpass", "ffmpeg") if not shutil.which(t)]
     if missing:
         print(f"\n[k1] Missing system tools — install with:")
         print(f"     sudo apt install {' '.join(missing)}\n")
@@ -70,7 +70,7 @@ import whisper
 from groq import Groq
 
 # ── Config ───────────────────────────────────────────────────────────────────
-GROQ_API_KEY  = "your_groq_api_key_here"  # get one free at console.groq.com
+GROQ_API_KEY  = "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"  # get one free at console.groq.com
 ROBOT_IP      = "192.168.10.102"
 ROBOT_USER    = "booster"
 ROBOT_PASS    = "123456"
@@ -210,13 +210,19 @@ def ask_nav_vision_model(groq_client: Groq, transcript: str, b64_image: str) -> 
     return resp
 
 
+PIPER_MODEL = "~/piper_voices/en_US-danny-low.onnx"
+PIPER_WAV   = "/tmp/piper_tts.wav"
+
 def robot_speak(text):
-    clean = text.replace('"', "'")
+    # Escape single quotes so the text is safe inside the remote shell command
+    clean = text.replace("'", "'\\''")
     ssh_cmd = (
-        f'sshpass -p "{ROBOT_PASS}" ssh -o StrictHostKeyChecking=no '
-        f'{ROBOT_USER}@{ROBOT_IP} '
-        f'"espeak-ng \\"{clean}\\" --stdout | aplay -D plughw:0,0 -q 2>/dev/null '
-        f'|| espeak-ng \\"{clean}\\" 2>/dev/null"'
+        f"sshpass -p '{ROBOT_PASS}' ssh -o StrictHostKeyChecking=no "
+        f"{ROBOT_USER}@{ROBOT_IP} "
+        f"\"echo '{clean}' | ~/.local/bin/piper "
+        f"--model {PIPER_MODEL} "
+        f"--output_file {PIPER_WAV} && "
+        f"aplay -D plughw:0,0 -q {PIPER_WAV} 2>/dev/null\""
     )
     subprocess.Popen(ssh_cmd, shell=True)
 
