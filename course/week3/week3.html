@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 3 — Robot Visualization</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week2/week2.html">&larr; Week 2</a>
+  <a href="../week4/week4.html">Week 4 &rarr;</a>
+</div>
+
+<h1 class="page-title">Week 3 — Robot Visualization</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Understand URDF: links, joints, and mesh files</li>
+    <li>Launch RViz2 with the K1 model displayed correctly</li>
+    <li>Stream the robot's camera feed over HTTP using the video bridge</li>
+    <li>Add custom visualization markers in RViz2</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. URDF — Unified Robot Description Format</h2>
+
+<p>
+  A URDF (Unified Robot Description Format) file is an XML document that
+  describes a robot's physical structure: its links (rigid bodies), joints
+  (how links connect and move), and appearance (mesh files).
+</p>
+
+<h3>1.1 Key Elements</h3>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Element</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Description</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>&lt;link&gt;</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A rigid body segment. Contains visual mesh, collision geometry, and inertial properties.</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>&lt;joint&gt;</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Connects two links. Defines motion type (revolute, prismatic, fixed, etc.) and axis of motion.</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>&lt;origin&gt;</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Position (xyz) and rotation (rpy — roll, pitch, yaw) of a link or joint relative to its parent.</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>&lt;mesh&gt;</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">STL or DAE 3-D model file for visual rendering in RViz2.</td>
+  </tr>
+</table>
+
+<h3>1.2 Joint Types Explained</h3>
+
+<ul>
+  <li><strong>revolute</strong> — rotates around one axis within specified limits (most K1 joints)</li>
+  <li><strong>continuous</strong> — rotates around one axis with no limits (wheels)</li>
+  <li><strong>prismatic</strong> — slides along one axis (linear actuators)</li>
+  <li><strong>fixed</strong> — no movement; welds two links together (chassis, camera mount)</li>
+  <li><strong>floating</strong> — 6-DOF free movement (used for the root/base link of floating-base robots)</li>
+</ul>
+
+<pre><span class="cm">&lt;!-- Excerpt from K1 URDF: left elbow revolute joint --&gt;</span>
+<span class="op">&lt;</span><span class="cls">joint</span> name=<span class="st">"left_elbow_joint"</span> type=<span class="st">"revolute"</span><span class="op">&gt;</span>
+  <span class="op">&lt;</span><span class="cls">parent</span> link=<span class="st">"left_upper_arm_link"</span><span class="op">/&gt;</span>
+  <span class="op">&lt;</span><span class="cls">child</span>  link=<span class="st">"left_lower_arm_link"</span><span class="op">/&gt;</span>
+  <span class="op">&lt;</span><span class="cls">origin</span> xyz=<span class="st">"0 0 -0.28"</span> rpy=<span class="st">"0 0 0"</span><span class="op">/&gt;</span>
+  <span class="op">&lt;</span><span class="cls">axis</span> xyz=<span class="st">"0 1 0"</span><span class="op">/&gt;</span>
+  <span class="op">&lt;</span><span class="cls">limit</span> lower=<span class="st">"-2.09"</span> upper=<span class="st">"0.0"</span>
+         effort=<span class="st">"30"</span> velocity=<span class="st">"10"</span><span class="op">/&gt;</span>
+<span class="op">&lt;/</span><span class="cls">joint</span><span class="op">&gt;</span></pre>
+
+<!-- =========================================================== -->
+<h2>2. RViz2 Setup with the K1 Model</h2>
+
+<h3>2.1 Launch robot_state_publisher</h3>
+
+<p>
+  <code>robot_state_publisher</code> reads the URDF and the live
+  <code>/joint_states</code> topic to broadcast <code>/tf</code>
+  transforms for every link. RViz2 uses those transforms to render
+  the model in the correct pose.
+</p>
+
+<pre><span class="cm"># On the robot — start robot_state_publisher with the K1 URDF</span>
+<span class="fn">ros2</span> run robot_state_publisher robot_state_publisher \
+    --ros-args -p robot_description:=<span class="st">"$(xacro ~/k1_description/urdf/k1.urdf.xacro)"</span></pre>
+
+<h3>2.2 Launch RViz2 and Configure the Display</h3>
+
+<div class="steps">
+  <ol>
+    <li>On your laptop, run <code>rviz2</code>.</li>
+    <li>In the <em>Global Options</em> panel (top-left), set <strong>Fixed Frame</strong> to <code>trunk_link</code>.</li>
+    <li>Click <em>Add</em> &rarr; <em>By display type</em> &rarr; <strong>RobotModel</strong>.</li>
+    <li>In the RobotModel panel, set <em>Description Topic</em> to <code>/robot_description</code>.</li>
+    <li>Click <em>Add</em> &rarr; <strong>TF</strong> to see all coordinate frames.</li>
+    <li>Save your config: <em>File &rarr; Save Config As</em> &rarr; <code>k1.rviz</code>.</li>
+  </ol>
+</div>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">RViz2 showing the full K1 robot model in its rest pose,
+    with the trunk_link frame at the origin and all 22 joints visible.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>3. Camera Feed via HTTP Bridge</h2>
+
+<p>
+  The K1's stereo camera publishes compressed images to
+  <code>/booster_video_stream</code>. The <code>robot_video_bridge.py</code>
+  script subscribes to that topic and re-serves the frames as a MJPEG
+  HTTP stream on port 8080 — viewable in any browser or OpenCV program.
+</p>
+
+<h3>3.1 Start the Video Bridge (on the robot)</h3>
+
+<pre><span class="cm"># Run the HTTP video bridge on the robot</span>
+<span class="fn">python3</span> ~/booster_robotics_sdk/scripts/robot_video_bridge.py \
+    --port <span class="num">8080</span> \
+    --topic /booster_video_stream</pre>
+
+<h3>3.2 View the Camera Feed</h3>
+
+<pre><span class="cm"># On your laptop — open the stream in a browser</span>
+<span class="cm"># Navigate to:  http://192.168.10.102:8080</span>
+
+<span class="cm"># Or use the provided viewer script</span>
+<span class="fn">python3</span> ~/booster_robotics_sdk/scripts/view_camera.py \
+    --host <span class="num">192.168.10.102</span> \
+    --port <span class="num">8080</span></pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Browser or OpenCV window showing the live stereo camera feed
+    from the K1 robot with the HTTP stream URL visible.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>4. Adding a Custom Marker in RViz2</h2>
+
+<p>
+  RViz2 <em>Markers</em> let you draw arbitrary shapes (arrows, spheres,
+  text) in the 3-D scene from Python. This is useful for debugging —
+  e.g., showing where the robot thinks a ball is.
+</p>
+
+<pre><span class="kw">import</span> rclpy
+<span class="kw">from</span> rclpy.node <span class="kw">import</span> Node
+<span class="kw">from</span> visualization_msgs.msg <span class="kw">import</span> Marker
+
+<span class="kw">class</span> <span class="cls">MarkerPublisher</span>(Node):
+    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="kw">self</span>):
+        <span class="fn">super</span>().<span class="fn">__init__</span>(<span class="st">'marker_publisher'</span>)
+        <span class="kw">self</span>.pub = <span class="kw">self</span>.<span class="fn">create_publisher</span>(Marker, <span class="st">'/visualization_marker'</span>, <span class="num">10</span>)
+        <span class="kw">self</span>.<span class="fn">create_timer</span>(<span class="num">1.0</span>, <span class="kw">self</span>.publish_marker)
+
+    <span class="kw">def</span> <span class="fn">publish_marker</span>(<span class="kw">self</span>):
+        m = <span class="cls">Marker</span>()
+        m.header.frame_id = <span class="st">'trunk_link'</span>
+        m.header.stamp = <span class="kw">self</span>.<span class="fn">get_clock</span>().<span class="fn">now</span>().<span class="fn">to_msg</span>()
+        m.ns = <span class="st">'demo'</span>; m.id = <span class="num">0</span>
+        m.type = Marker.SPHERE
+        m.action = Marker.ADD
+        m.pose.position.x = <span class="num">1.0</span>   <span class="cm"># 1 m in front</span>
+        m.pose.position.z = <span class="num">0.5</span>
+        m.scale.x = m.scale.y = m.scale.z = <span class="num">0.2</span>
+        m.color.r = <span class="num">1.0</span>; m.color.g = <span class="num">0.0</span>
+        m.color.b = <span class="num">0.0</span>; m.color.a = <span class="num">1.0</span>
+        <span class="kw">self</span>.pub.<span class="fn">publish</span>(m)
+
+<span class="kw">def</span> <span class="fn">main</span>():
+    rclpy.<span class="fn">init</span>()
+    rclpy.<span class="fn">spin</span>(<span class="cls">MarkerPublisher</span>())
+
+<span class="kw">if</span> __name__ == <span class="st">'__main__'</span>:
+    <span class="fn">main</span>()</pre>
+
+<div class="steps">
+  <ol>
+    <li>Save the script above as <code>marker_demo.py</code>.</li>
+    <li>In RViz2 click <em>Add</em> &rarr; <em>By topic</em> &rarr; <strong>/visualization_marker &rarr; Marker</strong>.</li>
+    <li>Run the script: <code>python3 marker_demo.py</code></li>
+    <li>A red sphere should appear 1 m in front of the robot in RViz2.</li>
+  </ol>
+</div>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">RViz2 showing the K1 robot model with a red sphere marker
+    floating 1 m in front of the trunk_link frame.</div>
+</div>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 3 (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>RViz2 Screenshot.</strong> Launch RViz2 with the K1 URDF model fully loaded and the TF tree visible. Set fixed frame to <code>trunk_link</code>. Submit a screenshot showing the full robot model with joints labeled.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Live Camera Feed.</strong> Run the video bridge and view the live camera feed. Take a screenshot of the stream showing live video from the robot's camera (even if the robot is stationary).</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Custom RViz2 Marker.</strong> Modify <code>marker_demo.py</code> to add a second marker — a <em>text</em> marker displaying "K1" above the robot's head. Screenshot showing both markers in RViz2.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>URDF Joint Types.</strong> Find all joint types used in the K1 URDF file and list how many of each type exist (revolute, fixed, etc.). Write 2–3 sentences explaining why the waist uses a different joint type than the fingers.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week2/week2.html">&larr; Week 2</a>
+  <a href="../week4/week4.html">Week 4 &rarr;</a>
+</div>
+
+</body>
+</html>

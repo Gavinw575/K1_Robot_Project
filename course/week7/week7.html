@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 7 — Sensor Fusion &amp; State Estimation</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week6/week6.html">&larr; Week 6</a>
+  <a href="../week8/week8.html">Week 8 &rarr;</a>
+</div>
+
+<h1 class="page-title">Week 7 — Sensor Fusion &amp; State Estimation</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Understand IMU data: accelerometer, gyroscope, and their noise characteristics</li>
+    <li>Subscribe to <code>/robot_interface/imu</code> and <code>/low_state</code></li>
+    <li>Read battery level from the state topic</li>
+    <li>Plot sensor streams in real-time using matplotlib</li>
+    <li>Build a fall detection algorithm from IMU data</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. IMU Fundamentals</h2>
+
+<p>
+  An Inertial Measurement Unit (IMU) combines an accelerometer and a
+  gyroscope (and sometimes a magnetometer) into a single chip. The K1
+  has an IMU mounted in its torso near the center of mass.
+</p>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Sensor</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Measures</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Units</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Noise Type</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Accelerometer</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Linear acceleration (includes gravity)</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">m/s&sup2;</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">White noise + vibration</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;">Gyroscope</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Angular velocity (rotation rate)</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">rad/s</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Drift + white noise</td>
+  </tr>
+</table>
+
+<p>
+  When the robot is standing still, the accelerometer reads approximately
+  <code>[0, 0, 9.81]</code> m/s&sup2; — the gravity vector pointing downward
+  in the <code>trunk_link</code> frame. A significant deviation from this
+  vector indicates the robot is tilted or falling.
+</p>
+
+<!-- =========================================================== -->
+<h2>2. Subscribing to IMU and Joint State Topics</h2>
+
+<pre><span class="kw">import</span> rclpy
+<span class="kw">from</span> rclpy.node <span class="kw">import</span> Node
+<span class="kw">from</span> sensor_msgs.msg <span class="kw">import</span> Imu, JointState
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> matplotlib.pyplot <span class="kw">as</span> plt
+<span class="kw">from</span> collections <span class="kw">import</span> deque
+<span class="kw">import</span> threading
+
+<span class="cls">WINDOW</span> = <span class="num">200</span>    <span class="cm"># samples to keep (at 100 Hz → 2 seconds of data)</span>
+
+<span class="kw">class</span> <span class="cls">SensorMonitor</span>(Node):
+    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="kw">self</span>):
+        <span class="fn">super</span>().<span class="fn">__init__</span>(<span class="st">"sensor_monitor"</span>)
+        <span class="kw">self</span>.accel_x = <span class="cls">deque</span>(maxlen=<span class="cls">WINDOW</span>)
+        <span class="kw">self</span>.accel_z = <span class="cls">deque</span>(maxlen=<span class="cls">WINDOW</span>)
+        <span class="kw">self</span>.gyro_y  = <span class="cls">deque</span>(maxlen=<span class="cls">WINDOW</span>)
+        <span class="kw">self</span>.<span class="fn">create_subscription</span>(
+            Imu, <span class="st">"/robot_interface/imu"</span>, <span class="kw">self</span>.imu_cb, <span class="num">10</span>)
+        <span class="kw">self</span>.<span class="fn">create_subscription</span>(
+            JointState, <span class="st">"/joint_states"</span>, <span class="kw">self</span>.joint_cb, <span class="num">10</span>)
+
+    <span class="kw">def</span> <span class="fn">imu_cb</span>(<span class="kw">self</span>, msg: Imu):
+        a = msg.linear_acceleration
+        g = msg.angular_velocity
+        <span class="kw">self</span>.accel_x.<span class="fn">append</span>(a.x)
+        <span class="kw">self</span>.accel_z.<span class="fn">append</span>(a.z)
+        <span class="kw">self</span>.gyro_y.<span class="fn">append</span>(g.y)
+
+    <span class="kw">def</span> <span class="fn">joint_cb</span>(<span class="kw">self</span>, msg: JointState):
+        <span class="cm"># Log only the knee joints</span>
+        <span class="kw">for</span> i, name <span class="kw">in</span> <span class="fn">enumerate</span>(msg.name):
+            <span class="kw">if</span> <span class="st">"knee"</span> <span class="kw">in</span> name:
+                pos = msg.position[i]
+                vel = msg.velocity[i]
+                <span class="kw">self</span>.<span class="fn">get_logger</span>().<span class="fn">info</span>(<span class="st">f"{name}: pos={pos:.3f} vel={vel:.3f}"</span>)</pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Matplotlib real-time plot showing IMU accelerometer X and Z axes
+    and gyroscope Y axis during the K1 walking in a straight line.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>3. Reading Battery Level</h2>
+
+<p>
+  Battery state is broadcast on <code>/low_state</code> as a custom
+  Booster message. The relevant field is <code>battery_state.percent</code>:
+</p>
+
+<pre><span class="kw">from</span> booster_msgs.msg <span class="kw">import</span> LowState
+
+<span class="kw">class</span> <span class="cls">BatteryMonitor</span>(Node):
+    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="kw">self</span>):
+        <span class="fn">super</span>().<span class="fn">__init__</span>(<span class="st">"battery_monitor"</span>)
+        <span class="kw">self</span>.start_time = <span class="kw">self</span>.<span class="fn">get_clock</span>().<span class="fn">now</span>()
+        <span class="kw">self</span>.log = []
+        <span class="kw">self</span>.<span class="fn">create_subscription</span>(
+            LowState, <span class="st">"/low_state"</span>, <span class="kw">self</span>.cb, <span class="num">5</span>)
+
+    <span class="kw">def</span> <span class="fn">cb</span>(<span class="kw">self</span>, msg: LowState):
+        pct = msg.battery_state.percent
+        voltage = msg.battery_state.voltage
+        elapsed = (<span class="kw">self</span>.<span class="fn">get_clock</span>().<span class="fn">now</span>() - <span class="kw">self</span>.start_time).<span class="fn">nanoseconds</span> / <span class="num">1e9</span>
+        <span class="kw">self</span>.log.<span class="fn">append</span>((elapsed, pct, voltage))
+        <span class="kw">if</span> pct &lt; <span class="num">20</span>:
+            <span class="kw">self</span>.<span class="fn">get_logger</span>().<span class="fn">warn</span>(<span class="st">f"LOW BATTERY: {pct:.0f}%"</span>)</pre>
+
+<!-- =========================================================== -->
+<h2>4. Fall Detection Algorithm</h2>
+
+<p>
+  A humanoid robot is falling when its torso tilts beyond a safe angle.
+  We detect this by measuring the angle between the IMU's measured
+  acceleration vector and the expected gravity vector:
+</p>
+
+<pre><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+GRAVITY       = np.<span class="fn">array</span>([<span class="num">0.0</span>, <span class="num">0.0</span>, <span class="num">9.81</span>])
+FALL_THRESHOLD = <span class="num">35</span>  <span class="cm"># degrees — robot is "falling" beyond this</span>
+
+<span class="kw">def</span> <span class="fn">tilt_angle_deg</span>(accel: np.ndarray) -&gt; float:
+    <span class="cm">"""Returns tilt angle (degrees) between accel and gravity vectors."""</span>
+    a_norm = accel / (np.<span class="fn">linalg</span>.<span class="fn">norm</span>(accel) + <span class="num">1e-9</span>)
+    g_norm = GRAVITY / <span class="fn">np</span>.<span class="fn">linalg</span>.<span class="fn">norm</span>(GRAVITY)
+    dot = np.<span class="fn">clip</span>(np.<span class="fn">dot</span>(a_norm, g_norm), -<span class="num">1.0</span>, <span class="num">1.0</span>)
+    <span class="kw">return</span> np.<span class="fn">degrees</span>(np.<span class="fn">arccos</span>(dot))
+
+<span class="kw">def</span> <span class="fn">is_falling</span>(accel: np.ndarray) -&gt; bool:
+    <span class="kw">return</span> <span class="fn">tilt_angle_deg</span>(accel) &gt; FALL_THRESHOLD</pre>
+
+<div class="tip-box">
+  <strong>Tip:</strong> Raw accelerometer data is noisy. Apply a low-pass filter
+  (e.g., exponential moving average with &alpha;&nbsp;=&nbsp;0.2) before
+  computing the tilt angle to avoid false fall detections from footstep
+  impacts.
+</div>
+
+<pre><span class="cm"># Simple exponential moving average filter</span>
+alpha = <span class="num">0.2</span>
+filtered = np.<span class="fn">array</span>([<span class="num">0.0</span>, <span class="num">0.0</span>, <span class="num">9.81</span>])
+
+<span class="kw">def</span> <span class="fn">update_filter</span>(raw_accel: np.ndarray) -&gt; np.ndarray:
+    <span class="kw">global</span> filtered
+    filtered = alpha * raw_accel + (<span class="num">1</span> - alpha) * filtered
+    <span class="kw">return</span> filtered</pre>
+
+<!-- =========================================================== -->
+<h2>5. Plotting IMU Data with Matplotlib</h2>
+
+<pre><span class="kw">import</span> matplotlib.pyplot <span class="kw">as</span> plt
+<span class="kw">import</span> matplotlib.animation <span class="kw">as</span> animation
+
+fig, axes = plt.<span class="fn">subplots</span>(<span class="num">2</span>, <span class="num">1</span>, figsize=(<span class="num">10</span>, <span class="num">6</span>))
+fig.<span class="fn">suptitle</span>(<span class="st">"K1 IMU Live Plot"</span>)
+
+<span class="kw">def</span> <span class="fn">animate</span>(frame, node):
+    axes[<span class="num">0</span>].<span class="fn">cla</span>(); axes[<span class="num">1</span>].<span class="fn">cla</span>()
+    axes[<span class="num">0</span>].<span class="fn">plot</span>(node.accel_x, label=<span class="st">"accel_x"</span>, color=<span class="st">"r"</span>)
+    axes[<span class="num">0</span>].<span class="fn">plot</span>(node.accel_z, label=<span class="st">"accel_z"</span>, color=<span class="st">"b"</span>)
+    axes[<span class="num">0</span>].<span class="fn">set_ylabel</span>(<span class="st">"Acceleration (m/s²)"</span>)
+    axes[<span class="num">0</span>].<span class="fn">legend</span>(loc=<span class="st">"upper right"</span>)
+    axes[<span class="num">1</span>].<span class="fn">plot</span>(node.gyro_y, label=<span class="st">"gyro_y"</span>, color=<span class="st">"g"</span>)
+    axes[<span class="num">1</span>].<span class="fn">set_ylabel</span>(<span class="st">"Angular Velocity (rad/s)"</span>)
+    axes[<span class="num">1</span>].<span class="fn">legend</span>(loc=<span class="st">"upper right"</span>)</pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Matplotlib plot showing 30 seconds of IMU accelerometer and
+    gyroscope data logged while the K1 walks forward and back.</div>
+</div>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 7 (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>IMU Walking Plot.</strong> Record IMU data for at least 30 seconds while the K1 walks forward and turns. Plot accelerometer X, Y, Z and gyroscope X, Y, Z on two subplots. Label the walking and turning phases on the plot.</td>
+      <td class="task-pts">30</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Fall Detection.</strong> Implement the tilt-angle fall detector with the EMA filter. Test it by gently tilting the robot by hand while stationary. The system should print a "FALL DETECTED" warning to the terminal when the tilt exceeds 35 degrees and trigger kDamping mode.</td>
+      <td class="task-pts">35</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Battery Drain Log.</strong> Log battery percentage and voltage every 5 seconds for 5 minutes while the robot is performing a repeating walk task. Plot the drain curve and calculate the estimated total runtime from the trend.</td>
+      <td class="task-pts">35</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week6/week6.html">&larr; Week 6</a>
+  <a href="../week8/week8.html">Week 8 &rarr;</a>
+</div>
+
+</body>
+</html>

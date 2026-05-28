@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 2 — ROS 2 Fundamentals</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week1/week1.html">&larr; Week 1</a>
+  <a href="../week3/week3.html">Week 3 &rarr;</a>
+</div>
+
+<h1 class="page-title">Week 2 — ROS 2 Fundamentals</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Understand the core ROS 2 concepts: nodes, topics, messages, and services</li>
+    <li>Configure FastDDS for Ethernet-based cross-machine communication</li>
+    <li>Use <code>ros2 topic</code> commands to inspect live robot data</li>
+    <li>Record and replay sensor data with rosbag2</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. What Is ROS 2?</h2>
+
+<p>
+  ROS 2 (Robot Operating System 2) is a middleware framework for building
+  robot software. Unlike ROS 1, ROS 2 is built on the DDS (Data Distribution
+  Service) standard, giving it real-time capabilities, multi-robot support,
+  and better security.
+</p>
+
+<h3>1.1 Core Concepts</h3>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Concept</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Description</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Node</strong></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A single executable process. Each node has a specific responsibility (e.g., camera driver, controller, planner).</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Topic</strong></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A named communication channel. Nodes <em>publish</em> data onto topics and <em>subscribe</em> to receive it. Topics are asynchronous and fire-and-forget.</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Message</strong></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A typed data structure sent over a topic. Examples: <code>sensor_msgs/Image</code>, <code>geometry_msgs/Twist</code>.</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Service</strong></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A request/response communication pattern. The client sends a request and blocks until the server replies. Used for discrete actions.</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Action</strong></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Like a service but with feedback streaming during long-running tasks (e.g., navigate to a goal).</td>
+  </tr>
+</table>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">ROS 2 node graph for the K1 robot showing camera, state publisher,
+    and controller nodes connected via topics.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>2. FastDDS Configuration for Ethernet</h2>
+
+<p>
+  By default, ROS 2 uses UDP multicast for peer discovery. On direct
+  Ethernet links (without a multicast-capable switch) this fails silently.
+  FastDDS with a static peer list solves this.
+</p>
+
+<h3>2.1 Create the FastDDS Configuration File</h3>
+
+<p>On your <strong>laptop</strong>, create <code>~/fastdds_k1.xml</code>:</p>
+
+<pre><span class="op">&lt;?</span><span class="kw">xml</span> version=<span class="st">"1.0"</span> encoding=<span class="st">"UTF-8"</span> <span class="op">?&gt;</span>
+<span class="op">&lt;</span><span class="cls">profiles</span> xmlns=<span class="st">"http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles"</span><span class="op">&gt;</span>
+  <span class="op">&lt;</span><span class="cls">transport_descriptors</span><span class="op">&gt;</span>
+    <span class="op">&lt;</span><span class="cls">transport_descriptor</span><span class="op">&gt;</span>
+      <span class="op">&lt;</span><span class="cls">transport_id</span><span class="op">&gt;</span>udp_transport<span class="op">&lt;/</span><span class="cls">transport_id</span><span class="op">&gt;</span>
+      <span class="op">&lt;</span><span class="cls">type</span><span class="op">&gt;</span>UDPv4<span class="op">&lt;/</span><span class="cls">type</span><span class="op">&gt;</span>
+    <span class="op">&lt;/</span><span class="cls">transport_descriptor</span><span class="op">&gt;</span>
+  <span class="op">&lt;/</span><span class="cls">transport_descriptors</span><span class="op">&gt;</span>
+  <span class="op">&lt;</span><span class="cls">participant</span> profile_name=<span class="st">"k1_participant"</span> is_default_profile=<span class="st">"true"</span><span class="op">&gt;</span>
+    <span class="op">&lt;</span><span class="cls">rtps</span><span class="op">&gt;</span>
+      <span class="op">&lt;</span><span class="cls">userTransports</span><span class="op">&gt;</span>
+        <span class="op">&lt;</span><span class="cls">transport_id</span><span class="op">&gt;</span>udp_transport<span class="op">&lt;/</span><span class="cls">transport_id</span><span class="op">&gt;</span>
+      <span class="op">&lt;/</span><span class="cls">userTransports</span><span class="op">&gt;</span>
+      <span class="op">&lt;</span><span class="cls">useBuiltinTransports</span><span class="op">&gt;</span>false<span class="op">&lt;/</span><span class="cls">useBuiltinTransports</span><span class="op">&gt;</span>
+      <span class="op">&lt;</span><span class="cls">builtin</span><span class="op">&gt;</span>
+        <span class="op">&lt;</span><span class="cls">discovery_config</span><span class="op">&gt;</span>
+          <span class="op">&lt;</span><span class="cls">initialPeersList</span><span class="op">&gt;</span>
+            <span class="op">&lt;</span><span class="cls">locator</span><span class="op">&gt;&lt;</span><span class="cls">udpv4</span><span class="op">&gt;&lt;</span><span class="cls">address</span><span class="op">&gt;</span>192.168.10.102<span class="op">&lt;/</span><span class="cls">address</span><span class="op">&gt;&lt;/</span><span class="cls">udpv4</span><span class="op">&gt;&lt;/</span><span class="cls">locator</span><span class="op">&gt;</span>
+          <span class="op">&lt;/</span><span class="cls">initialPeersList</span><span class="op">&gt;</span>
+        <span class="op">&lt;/</span><span class="cls">discovery_config</span><span class="op">&gt;</span>
+      <span class="op">&lt;/</span><span class="cls">builtin</span><span class="op">&gt;</span>
+    <span class="op">&lt;/</span><span class="cls">rtps</span><span class="op">&gt;</span>
+  <span class="op">&lt;/</span><span class="cls">participant</span><span class="op">&gt;</span>
+<span class="op">&lt;/</span><span class="cls">profiles</span><span class="op">&gt;</span></pre>
+
+<h3>2.2 Set Environment Variables</h3>
+
+<p>
+  Add the following lines to your laptop's <code>~/.bashrc</code> (and
+  <code>source ~/.bashrc</code> afterward):
+</p>
+
+<pre><span class="cm"># ROS 2 environment — add to ~/.bashrc on your laptop</span>
+<span class="kw">source</span> /opt/ros/humble/setup.bash
+
+<span class="cm"># Use the same domain as the robot</span>
+<span class="kw">export</span> <span class="cls">ROS_DOMAIN_ID</span>=<span class="num">0</span>
+
+<span class="cm"># Force FastDDS as the RMW implementation</span>
+<span class="kw">export</span> <span class="cls">RMW_IMPLEMENTATION</span>=rmw_fastrtps_cpp
+
+<span class="cm"># Point FastDDS to the static peer config</span>
+<span class="kw">export</span> <span class="cls">FASTRTPS_DEFAULT_PROFILES_FILE</span>=~/fastdds_k1.xml</pre>
+
+<h3>2.3 DDS vs WiFi Discovery — Why the XML File Is Needed</h3>
+
+<p>
+  ROS 2 DDS discovery works by broadcasting "participant announcement"
+  UDP packets. On a WiFi network these broadcasts reach all devices
+  automatically. On a direct Ethernet cable or an unmanaged switch the
+  multicast packets may not be forwarded, so the two machines never find
+  each other. The XML file hard-codes the robot's IP as an
+  <em>initial peer</em>, bypassing multicast discovery entirely.
+</p>
+
+<!-- =========================================================== -->
+<h2>3. Topic Commands</h2>
+
+<pre><span class="cm"># List all active topics</span>
+<span class="fn">ros2</span> topic list
+
+<span class="cm"># Echo live messages on a topic (Ctrl-C to stop)</span>
+<span class="fn">ros2</span> topic echo /low_state
+
+<span class="cm"># Show message type and connection info</span>
+<span class="fn">ros2</span> topic info /booster_video_stream
+
+<span class="cm"># Measure publish rate (Hz)</span>
+<span class="fn">ros2</span> topic hz /robot_interface/imu
+
+<span class="cm"># Show full message schema</span>
+<span class="fn">ros2</span> interface show sensor_msgs/msg/Imu</pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Terminal output of <code>ros2 topic info /booster_video_stream</code>
+    showing publisher count, subscriber count, and message type.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>4. Recording and Playing Back Rosbags</h2>
+
+<p>
+  Rosbag2 lets you capture all topic data to disk and replay it later —
+  invaluable for offline algorithm development.
+</p>
+
+<pre><span class="cm"># Record all topics for 10 seconds into a bag named k1_test</span>
+<span class="fn">ros2</span> bag record -o k1_test --duration <span class="num">10</span> -a
+
+<span class="cm"># List what was recorded</span>
+<span class="fn">ros2</span> bag info k1_test
+
+<span class="cm"># Replay the bag at normal speed</span>
+<span class="fn">ros2</span> bag play k1_test
+
+<span class="cm"># Replay at half speed</span>
+<span class="fn">ros2</span> bag play k1_test --rate <span class="num">0.5</span>
+
+<span class="cm"># Record only the camera and IMU topics</span>
+<span class="fn">ros2</span> bag record -o k1_sensors \
+    /booster_video_stream \
+    /robot_interface/imu</pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Output of <code>ros2 bag info k1_test</code> showing duration,
+    topic names, message counts, and file size.</div>
+</div>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 2 (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>Echo Topic Info.</strong> Run <code>ros2 topic info /booster_video_stream</code> from your laptop (not from the robot) and take a screenshot proving cross-machine DDS discovery is working.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Record a Rosbag.</strong> Record a 10-second rosbag that includes the IMU and camera topics while the robot is standing still. Submit the output of <code>ros2 bag info</code> as a screenshot.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Node Graph.</strong> Run <code>rqt_graph</code> while the robot stack is running. Draw or screenshot the resulting node/topic graph and label the publisher and subscriber for at least 3 topics.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>DDS vs WiFi Explanation.</strong> In 200–300 words, explain why DDS discovery fails on a direct Ethernet cable without the XML peer file, and what the XML file does to fix it. Include a simple diagram.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week1/week1.html">&larr; Week 1</a>
+  <a href="../week3/week3.html">Week 3 &rarr;</a>
+</div>
+
+</body>
+</html>

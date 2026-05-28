@@ -1,0 +1,250 @@
+/* K1 Robot Course - Shared Stylesheet */
+/* Matches yilectronics.com style: Comic Sans MS, peach background */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Comic Sans MS", "Comic Sans";
+  background-color: rgb(255, 230, 204);
+  color: rgb(0, 0, 0);
+  margin: 0;
+  padding: 10px 20px;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 10px 24px 40px 24px;
+}
+
+a {
+  color: #000099;
+}
+a:visited {
+  color: #990099;
+}
+a:hover {
+  color: #cc0000;
+}
+
+/* Navigation bar */
+.nav-bar {
+  background-color: rgb(200, 140, 80);
+  padding: 8px 12px;
+  margin-bottom: 20px;
+  border-radius: 4px;
+  font-weight: bold;
+}
+.nav-bar a {
+  color: #fff;
+  margin-right: 18px;
+  text-decoration: none;
+  font-size: 0.95em;
+}
+.nav-bar a:hover {
+  text-decoration: underline;
+  color: #fff0cc;
+}
+.nav-bar a:visited {
+  color: #fff;
+}
+
+/* Page title */
+h1.page-title {
+  font-family: "Comic Sans MS", "Comic Sans";
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+/* Section headers */
+h2 {
+  font-family: "Comic Sans MS", "Comic Sans";
+  font-size: 1.2em;
+  font-weight: bold;
+  margin-top: 22px;
+  margin-bottom: 4px;
+}
+
+h3 {
+  font-family: "Comic Sans MS", "Comic Sans";
+  font-size: 1.05em;
+  font-weight: bold;
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+p {
+  margin: 6px 0 10px 0;
+  line-height: 1.6;
+}
+
+ul, ol {
+  line-height: 1.7;
+  margin-top: 4px;
+}
+
+/* Learning objectives box */
+.objectives-box {
+  background-color: rgb(255, 245, 220);
+  border: 2px solid rgb(200, 140, 80);
+  border-radius: 4px;
+  padding: 10px 16px;
+  margin: 12px 0 18px 0;
+}
+.objectives-box strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 1.05em;
+}
+
+/* Code blocks */
+pre {
+  background-color: #1e1e2e;
+  color: #cdd6f4;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.88em;
+  padding: 14px 16px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 10px 0 16px 0;
+  border-left: 4px solid rgb(200, 140, 80);
+  white-space: pre;
+}
+
+/* Inline code */
+code {
+  font-family: "Courier New", Courier, monospace;
+  background-color: #f0e0c8;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  border-radius: 0;
+}
+
+/* Syntax highlight classes */
+.kw  { color: #cba6f7; } /* keywords */
+.fn  { color: #89b4fa; } /* functions/methods */
+.st  { color: #a6e3a1; } /* strings */
+.cm  { color: #6c7086; } /* comments */
+.num { color: #fab387; } /* numbers */
+.cls { color: #f9e2af; } /* class names */
+.op  { color: #89dceb; } /* operators/special */
+
+/* Screenshot placeholder */
+.screenshot {
+  background-color: #c8c8c8;
+  border: 2px dashed #888;
+  border-radius: 4px;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 12px 0 18px 0;
+  padding: 16px;
+  text-align: center;
+  color: #444;
+}
+.screenshot .ss-label {
+  font-weight: bold;
+  font-size: 0.95em;
+  margin-bottom: 6px;
+}
+.screenshot .ss-caption {
+  font-size: 0.85em;
+  color: #555;
+  max-width: 500px;
+}
+
+/* Step-by-step numbered instructions */
+.steps {
+  background-color: rgb(255, 248, 230);
+  border-left: 4px solid rgb(200, 140, 80);
+  padding: 10px 16px;
+  margin: 10px 0 18px 0;
+}
+.steps ol {
+  margin: 0;
+  padding-left: 22px;
+}
+.steps ol li {
+  margin-bottom: 6px;
+}
+
+/* Tasks section */
+.tasks-section {
+  background-color: rgb(255, 240, 200);
+  border: 2px solid rgb(180, 100, 40);
+  border-radius: 4px;
+  padding: 12px 18px;
+  margin-top: 30px;
+}
+.tasks-section h2 {
+  margin-top: 0;
+  color: #7a3000;
+}
+.tasks-section table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 8px;
+}
+.tasks-section th, .tasks-section td {
+  border: 1px solid #c87830;
+  padding: 6px 10px;
+  text-align: left;
+}
+.tasks-section th {
+  background-color: rgb(210, 150, 80);
+  color: #fff;
+}
+.tasks-section tr:nth-child(even) td {
+  background-color: rgb(255, 248, 225);
+}
+.task-pts {
+  font-weight: bold;
+  color: #7a3000;
+  text-align: right !important;
+}
+
+/* Warning / tip boxes */
+.warning-box {
+  background-color: #ffe0e0;
+  border: 2px solid #cc3300;
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin: 10px 0;
+}
+.tip-box {
+  background-color: #e0f4e0;
+  border: 2px solid #339933;
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin: 10px 0;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid rgb(180, 120, 60);
+  margin: 20px 0;
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+  body {
+    padding: 6px 10px 30px 10px;
+  }
+  pre {
+    font-size: 0.78em;
+  }
+  .nav-bar a {
+    display: inline-block;
+    margin-bottom: 4px;
+  }
+}

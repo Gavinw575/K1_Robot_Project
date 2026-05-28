@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 4 — SDK &amp; Basic Motion Control</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week3/week3.html">&larr; Week 3</a>
+  <a href="../week5/week5.html">Week 5 &rarr;</a>
+</div>
+
+<h1 class="page-title">Week 4 — SDK &amp; Basic Motion Control</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Understand the Booster SDK architecture: ChannelFactory and B1LocoClient</li>
+    <li>Know the three primary control modes: kPrepare, kWalk, kDamping</li>
+    <li>Send velocity commands using Move(vx, vy, vyaw)</li>
+    <li>Implement safe motion programs with proper initialization and cleanup</li>
+    <li>Write a program to walk forward 1 metre and turn 90 degrees</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. Booster SDK Architecture</h2>
+
+<p>
+  The Booster Robotics SDK provides a Python (and C++) API that abstracts
+  the low-level motor commands into high-level locomotion calls. The two
+  most important classes are:
+</p>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Class</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Role</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>ChannelFactory</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Manages the DDS network channel. You pass the network interface name (e.g., <code>"eth0"</code>) and it handles discovery and transport setup.</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>B1LocoClient</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">High-level locomotion client. Sends mode changes and velocity commands to the robot's motion controller.</td>
+  </tr>
+</table>
+
+<h3>1.1 SDK Installation Check</h3>
+
+<pre><span class="cm"># Verify SDK is installed and importable</span>
+<span class="fn">python3</span> -c <span class="st">"import booster_robotics_sdk; print('SDK OK')"</span>
+
+<span class="cm"># If not found, build from source</span>
+<span class="fn">cd</span> ~/booster_robotics_sdk
+<span class="fn">mkdir</span> build &amp;&amp; <span class="fn">cd</span> build
+<span class="fn">cmake</span> .. -DBUILD_PYTHON_BINDINGS=ON
+<span class="fn">make</span> -j4
+<span class="fn">sudo</span> make install</pre>
+
+<!-- =========================================================== -->
+<h2>2. Control Modes</h2>
+
+<p>
+  Before any motion command can be sent, the robot must be in the correct
+  mode. Modes are changed sequentially — you cannot jump from kDamping
+  directly to kWalk.
+</p>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Mode</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Description</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Typical Use</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>kDamping</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Joints resist motion passively. Robot can be physically moved.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Safe idle state; always use for shutdown.</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>kPrepare</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Robot stiffens joints and moves to a neutral standing pose.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Transition state before walking.</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>kWalk</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Active balance and locomotion controller enabled. Robot responds to Move() commands.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">All walking tasks.</td>
+  </tr>
+</table>
+
+<div class="warning-box">
+  <strong>&#9888; Mode Transition Order</strong><br>
+  Always transition: <code>kDamping</code> &rarr; <code>kPrepare</code> &rarr; <code>kWalk</code>.
+  Never skip kPrepare — the robot must reach its balanced stance before
+  the walk controller takes over, otherwise it may fall.
+</div>
+
+<!-- =========================================================== -->
+<h2>3. The Move() Command</h2>
+
+<p>
+  <code>client.Move(vx, vy, vyaw)</code> sends a velocity command to the
+  locomotion controller. All values are in SI units:
+</p>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Parameter</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Units</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Meaning</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Safe Range</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>vx</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">m/s</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Forward (+) / backward (−) speed</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">−0.5 to +0.5</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>vy</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">m/s</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Left (+) / right (−) lateral speed</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">−0.3 to +0.3</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>vyaw</code></td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">rad/s</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Counter-clockwise (+) / clockwise (−) rotation</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">−0.5 to +0.5</td>
+  </tr>
+</table>
+
+<!-- =========================================================== -->
+<h2>4. Walk Forward 1 Metre and Turn 90 Degrees</h2>
+
+<pre><span class="kw">import</span> time
+<span class="kw">import</span> booster_robotics_sdk <span class="kw">as</span> sdk
+
+<span class="cm"># ---------- configuration ----------</span>
+NETWORK_IFACE = <span class="st">"eth0"</span>
+FORWARD_SPEED = <span class="num">0.3</span>   <span class="cm"># m/s</span>
+FORWARD_DIST  = <span class="num">1.0</span>   <span class="cm"># metres</span>
+TURN_SPEED    = <span class="num">0.4</span>   <span class="cm"># rad/s</span>
+TURN_ANGLE    = <span class="num">1.5708</span> <span class="cm"># 90 degrees in radians</span>
+
+<span class="kw">def</span> <span class="fn">main</span>():
+    <span class="cm"># Initialise channel and client</span>
+    sdk.ChannelFactory.<span class="fn">Instance</span>().<span class="fn">Init</span>(<span class="num">0</span>, NETWORK_IFACE)
+    client = sdk.<span class="cls">B1LocoClient</span>()
+    client.<span class="fn">Init</span>()
+
+    <span class="kw">try</span>:
+        <span class="cm"># 1. Prepare mode — robot stands up</span>
+        <span class="fn">print</span>(<span class="st">"Entering kPrepare..."</span>)
+        client.<span class="fn">ChangeMode</span>(sdk.RobotMode.kPrepare)
+        time.<span class="fn">sleep</span>(<span class="num">3</span>)
+
+        <span class="cm"># 2. Walk mode — balance controller active</span>
+        <span class="fn">print</span>(<span class="st">"Entering kWalk..."</span>)
+        client.<span class="fn">ChangeMode</span>(sdk.RobotMode.kWalk)
+        time.<span class="fn">sleep</span>(<span class="num">1</span>)
+
+        <span class="cm"># 3. Walk forward 1 metre</span>
+        duration_fwd = FORWARD_DIST / FORWARD_SPEED   <span class="cm"># ≈ 3.33 s</span>
+        <span class="fn">print</span>(<span class="st">f"Walking forward {FORWARD_DIST} m..."</span>)
+        t_start = time.<span class="fn">time</span>()
+        <span class="kw">while</span> time.<span class="fn">time</span>() - t_start &lt; duration_fwd:
+            client.<span class="fn">Move</span>(FORWARD_SPEED, <span class="num">0</span>, <span class="num">0</span>)
+            time.<span class="fn">sleep</span>(<span class="num">0.02</span>)
+
+        <span class="cm"># Stop</span>
+        client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>)
+        time.<span class="fn">sleep</span>(<span class="num">1</span>)
+
+        <span class="cm"># 4. Turn 90 degrees counter-clockwise</span>
+        duration_turn = TURN_ANGLE / TURN_SPEED       <span class="cm"># ≈ 3.93 s</span>
+        <span class="fn">print</span>(<span class="st">"Turning 90 degrees..."</span>)
+        t_start = time.<span class="fn">time</span>()
+        <span class="kw">while</span> time.<span class="fn">time</span>() - t_start &lt; duration_turn:
+            client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, TURN_SPEED)
+            time.<span class="fn">sleep</span>(<span class="num">0.02</span>)
+
+        client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>)
+        <span class="fn">print</span>(<span class="st">"Done."</span>)
+
+    <span class="kw">finally</span>:
+        <span class="cm"># Always return to damping mode — this runs even if an exception occurs</span>
+        <span class="fn">print</span>(<span class="st">"Returning to kDamping (safe state)..."</span>)
+        client.<span class="fn">ChangeMode</span>(sdk.RobotMode.kDamping)
+
+<span class="kw">if</span> __name__ == <span class="st">"__main__"</span>:
+    <span class="fn">main</span>()</pre>
+
+<div class="tip-box">
+  <strong>Why try/finally?</strong><br>
+  If your code crashes mid-motion (exception, Ctrl-C, network error), the
+  <code>finally</code> block still runs and sends the robot back to
+  kDamping. Without it, the robot continues executing the last Move()
+  command indefinitely.
+</div>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">K1 robot mid-walk: side view showing gait cycle with one foot
+    lifted, taken from a fixed camera approximately 2 m away.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>5. Safety: Always Initialize to kPrepare</h2>
+
+<div class="steps">
+  <ol>
+    <li>Power on the robot. Wait for green LED.</li>
+    <li>SSH into the robot. Source the ROS 2 and SDK environment.</li>
+    <li>Visually confirm the robot is in a safe stance (not leaning).</li>
+    <li>Call <code>ChangeMode(kPrepare)</code> and wait 3 seconds for it to complete.</li>
+    <li>Only then call <code>ChangeMode(kWalk)</code>.</li>
+    <li>Send all Move() commands with small values first to verify response.</li>
+    <li>When done: <code>Move(0,0,0)</code> then <code>ChangeMode(kDamping)</code>.</li>
+  </ol>
+</div>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 4 (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>walk_square.py.</strong> Write a Python script that makes the K1 walk in a 1 m &times; 1 m square (forward 1 m, turn 90°, repeat 4 times). The robot should return close to its starting position. Submit code and a video or photo sequence.</td>
+      <td class="task-pts">40</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Emergency Stop Handler.</strong> Add a signal handler to <code>walk_square.py</code> that catches SIGINT (Ctrl-C) and cleanly transitions to kDamping before exiting. Demonstrate it works by pressing Ctrl-C mid-walk.</td>
+      <td class="task-pts">30</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Joint State Logging.</strong> During the square walk, subscribe to <code>/joint_states</code> and log the position and velocity of both knee joints to a CSV file. Plot the data using matplotlib and submit the plot.</td>
+      <td class="task-pts">30</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week3/week3.html">&larr; Week 3</a>
+  <a href="../week5/week5.html">Week 5 &rarr;</a>
+</div>
+
+</body>
+</html>

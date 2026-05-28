@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 8 — Autonomous Ball Tracking</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week7/week7.html">&larr; Week 7</a>
+  <a href="../week9/week9.html">Week 9 &rarr;</a>
+</div>
+
+<h1 class="page-title">Week 8 — Autonomous Ball Tracking</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Implement proportional control to close the loop between vision and motion</li>
+    <li>Convert pixel-space bounding box coordinates to robot velocity commands</li>
+    <li>Estimate distance from bounding box area</li>
+    <li>Build a state machine: SEARCHING, TRACKING, APPROACHING, KICKING</li>
+    <li>Tune proportional gains for smooth, stable tracking</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. Proportional Control Theory</h2>
+
+<p>
+  A proportional controller computes an output proportional to the
+  current error. For ball tracking, the &ldquo;error&rdquo; is the
+  distance between the ball and the image center:
+</p>
+
+<pre><span class="cm"># Proportional control</span>
+<span class="cm"># error  = desired_value - current_value</span>
+<span class="cm"># output = Kp * error</span>
+
+<span class="cm"># For yaw (left/right tracking):</span>
+<span class="cm"># error_yaw = frame_center_x - ball_center_x    (pixels)</span>
+<span class="cm"># vyaw = Kp_yaw * error_yaw</span>
+
+<span class="cm"># For forward speed (approach):</span>
+<span class="cm"># error_dist = target_area - ball_area  (pixels^2)</span>
+<span class="cm"># vx = Kp_vx * error_dist</span></pre>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Gain Too High</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Gain Too Low</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Gain Just Right</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Oscillation / overshoot — robot swings past the ball and corrects back repeatedly</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Slow response — ball rolls away before robot catches up</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Smooth convergence — robot centers on ball in 1–2 seconds without oscillation</td>
+  </tr>
+</table>
+
+<!-- =========================================================== -->
+<h2>2. Pixel Space to Robot Commands</h2>
+
+<p>
+  The K1 camera outputs frames at 640&times;480 pixels. The image center
+  is at (320, 240). If the ball is at pixel (bx, by):
+</p>
+
+<pre><span class="cm"># Frame dimensions (update if camera resolution differs)</span>
+FRAME_W = <span class="num">640</span>
+FRAME_H = <span class="num">480</span>
+CENTER_X = FRAME_W // <span class="num">2</span>   <span class="cm"># 320</span>
+
+<span class="cm"># Normalize error to [-1, 1]</span>
+<span class="cm"># Positive error → ball is left of center → turn left (positive vyaw)</span>
+<span class="kw">def</span> <span class="fn">pixel_to_yaw_error</span>(ball_cx: float) -&gt; float:
+    <span class="kw">return</span> (CENTER_X - ball_cx) / CENTER_X   <span class="cm"># [-1, +1]</span>
+
+<span class="cm"># Bounding box area → distance proxy</span>
+<span class="cm"># Large area = close; small area = far</span>
+TARGET_AREA = <span class="num">8000</span>   <span class="cm"># pixels^2 — desired "kick distance"</span>
+
+<span class="kw">def</span> <span class="fn">area_to_vx_error</span>(box_w: float, box_h: float) -&gt; float:
+    area = box_w * box_h
+    <span class="kw">return</span> (area - TARGET_AREA) / TARGET_AREA   <span class="cm"># negative = too far away</span></pre>
+
+<!-- =========================================================== -->
+<h2>3. Ball Detection with YOLOv8</h2>
+
+<pre><span class="kw">from</span> ultralytics <span class="kw">import</span> YOLO
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+model = <span class="cls">YOLO</span>(<span class="st">"yolov8n.pt"</span>)
+BALL_CLASS_ID = <span class="num">32</span>   <span class="cm"># COCO class 32 = sports ball</span>
+CONF_THRESH   = <span class="num">0.45</span>
+
+<span class="kw">def</span> <span class="fn">detect_ball</span>(frame: np.ndarray):
+    <span class="cm">"""Returns (cx, cy, w, h) of the highest-confidence ball, or None."""</span>
+    results = model(frame, conf=CONF_THRESH, classes=[BALL_CLASS_ID],
+                    verbose=<span class="kw">False</span>)[<span class="num">0</span>]
+    <span class="kw">if</span> <span class="fn">len</span>(results.boxes) == <span class="num">0</span>:
+        <span class="kw">return</span> <span class="kw">None</span>
+    box = results.boxes[<span class="num">0</span>]   <span class="cm"># highest confidence first</span>
+    x1, y1, x2, y2 = box.xyxy[<span class="num">0</span>].<span class="fn">tolist</span>()
+    cx = (x1 + x2) / <span class="num">2</span>
+    cy = (y1 + y2) / <span class="num">2</span>
+    w  = x2 - x1
+    h  = y2 - y1
+    <span class="kw">return</span> cx, cy, w, h</pre>
+
+<!-- =========================================================== -->
+<h2>4. State Machine</h2>
+
+<p>
+  A finite state machine organizes the robot's behavior into discrete
+  states, each with clear entry/exit conditions:
+</p>
+
+<pre><span class="kw">from</span> enum <span class="kw">import</span> Enum, auto
+
+<span class="kw">class</span> <span class="cls">State</span>(Enum):
+    SEARCHING   = <span class="fn">auto</span>()   <span class="cm"># rotate in place looking for ball</span>
+    TRACKING    = <span class="fn">auto</span>()   <span class="cm"># ball visible; align heading</span>
+    APPROACHING = <span class="fn">auto</span>()   <span class="cm"># heading aligned; walk toward ball</span>
+    KICKING     = <span class="fn">auto</span>()   <span class="cm"># close enough; execute kick motion</span>
+
+SEARCH_VYAW  = <span class="num">0.3</span>    <span class="cm"># rad/s slow search rotation</span>
+KP_YAW       = <span class="num">0.5</span>    <span class="cm"># proportional gain for yaw</span>
+KP_VX        = <span class="num">0.0003</span> <span class="cm"># proportional gain for forward speed</span>
+ALIGN_TOL    = <span class="num">0.08</span>   <span class="cm"># normalized error; within this → aligned</span>
+KICK_AREA    = <span class="num">12000</span>  <span class="cm"># ball bbox area when close enough to kick</span>
+LOST_TIMEOUT = <span class="num">3.0</span>    <span class="cm"># seconds without seeing ball → back to SEARCHING</span>
+
+<span class="kw">import</span> time
+
+<span class="kw">class</span> <span class="cls">BallTracker</span>:
+    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="kw">self</span>, loco_client):
+        <span class="kw">self</span>.client = loco_client
+        <span class="kw">self</span>.state  = <span class="cls">State</span>.SEARCHING
+        <span class="kw">self</span>.last_seen = time.<span class="fn">time</span>()
+
+    <span class="kw">def</span> <span class="fn">update</span>(<span class="kw">self</span>, frame: np.ndarray):
+        detection = <span class="fn">detect_ball</span>(frame)
+
+        <span class="cm"># ----- Lost ball timeout -----</span>
+        <span class="kw">if</span> detection <span class="kw">is</span> <span class="kw">None</span>:
+            <span class="kw">if</span> time.<span class="fn">time</span>() - <span class="kw">self</span>.last_seen &gt; LOST_TIMEOUT:
+                <span class="kw">self</span>.state = <span class="cls">State</span>.SEARCHING
+        <span class="kw">else</span>:
+            <span class="kw">self</span>.last_seen = time.<span class="fn">time</span>()
+
+        <span class="kw">if</span> <span class="kw">self</span>.state == <span class="cls">State</span>.SEARCHING:
+            <span class="kw">self</span>.<span class="fn">_search</span>(detection)
+        <span class="kw">elif</span> <span class="kw">self</span>.state == <span class="cls">State</span>.TRACKING:
+            <span class="kw">self</span>.<span class="fn">_track</span>(detection)
+        <span class="kw">elif</span> <span class="kw">self</span>.state == <span class="cls">State</span>.APPROACHING:
+            <span class="kw">self</span>.<span class="fn">_approach</span>(detection)
+        <span class="kw">elif</span> <span class="kw">self</span>.state == <span class="cls">State</span>.KICKING:
+            <span class="kw">self</span>.<span class="fn">_kick</span>()
+
+    <span class="kw">def</span> <span class="fn">_search</span>(<span class="kw">self</span>, detection):
+        <span class="kw">if</span> detection:
+            <span class="kw">self</span>.state = <span class="cls">State</span>.TRACKING
+            <span class="kw">return</span>
+        <span class="kw">self</span>.client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, SEARCH_VYAW)
+
+    <span class="kw">def</span> <span class="fn">_track</span>(<span class="kw">self</span>, detection):
+        <span class="kw">if</span> detection <span class="kw">is</span> <span class="kw">None</span>:
+            <span class="kw">return</span>
+        cx, cy, w, h = detection
+        yaw_err = <span class="fn">pixel_to_yaw_error</span>(cx)
+        vyaw = KP_YAW * yaw_err
+        <span class="kw">self</span>.client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, vyaw)
+        <span class="kw">if</span> <span class="fn">abs</span>(yaw_err) &lt; ALIGN_TOL:
+            <span class="kw">self</span>.state = <span class="cls">State</span>.APPROACHING
+
+    <span class="kw">def</span> <span class="fn">_approach</span>(<span class="kw">self</span>, detection):
+        <span class="kw">if</span> detection <span class="kw">is</span> <span class="kw">None</span>:
+            <span class="kw">return</span>
+        cx, cy, w, h = detection
+        vx_err = <span class="fn">area_to_vx_error</span>(w, h)
+        <span class="kw">if</span> w * h &gt;= KICK_AREA:
+            <span class="kw">self</span>.state = <span class="cls">State</span>.KICKING
+            <span class="kw">return</span>
+        yaw_err = <span class="fn">pixel_to_yaw_error</span>(cx)
+        vyaw = KP_YAW * yaw_err * <span class="num">0.5</span>    <span class="cm"># gentle yaw correction while approaching</span>
+        vx   = -KP_VX * vx_err
+        vx   = <span class="fn">max</span>(<span class="num">0.05</span>, <span class="fn">min</span>(<span class="num">0.3</span>, vx))  <span class="cm"># clamp forward speed</span>
+        <span class="kw">self</span>.client.<span class="fn">Move</span>(vx, <span class="num">0</span>, vyaw)
+
+    <span class="kw">def</span> <span class="fn">_kick</span>(<span class="kw">self</span>):
+        <span class="kw">self</span>.client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>)
+        <span class="fn">print</span>(<span class="st">"KICK!"</span>)
+        <span class="cm"># TODO: trigger kick motion via SDK</span>
+        time.<span class="fn">sleep</span>(<span class="num">2</span>)
+        <span class="kw">self</span>.state = <span class="cls">State</span>.SEARCHING</pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">State machine diagram showing transitions: SEARCHING → TRACKING
+    (ball detected) → APPROACHING (aligned) → KICKING (close enough) → SEARCHING (after kick).</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>5. Tuning the Proportional Gains</h2>
+
+<div class="steps">
+  <ol>
+    <li>Start with <code>KP_YAW = 0.1</code> and <code>KP_VX = 0.0001</code> (very low).</li>
+    <li>Place a ball in front of the robot and observe the tracking behavior.</li>
+    <li>Increase <code>KP_YAW</code> gradually by 0.1 until the robot turns toward the ball promptly without overshooting.</li>
+    <li>If you see left-right oscillation, reduce <code>KP_YAW</code> by 0.05.</li>
+    <li>Then increase <code>KP_VX</code> until the robot walks toward the ball at a comfortable speed.</li>
+    <li>Test by rolling the ball slowly and checking the robot tracks it smoothly.</li>
+  </ol>
+</div>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 8 (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>Ball Tracker with State Machine.</strong> Implement the full BallTracker class and integrate it into a ROS 2 node that reads from <code>/booster_video_stream</code>. The robot should reliably detect a soccer ball, approach it, and attempt a kick. Submit code and a video demonstration.</td>
+      <td class="task-pts">50</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Gain Tuning.</strong> Run 5 trials with different <code>KP_YAW</code> values (0.1, 0.2, 0.3, 0.5, 0.8). For each, measure the time to align with the ball and the number of oscillations. Present as a table and explain which value gave the best result.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Lost Ball Recovery.</strong> Implement the lost ball timeout. When the ball goes out of frame for more than 3 seconds, the robot should enter a slow rotation to search. After 10 seconds of searching, it should stop and wait. Demonstrate both behaviors.</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week7/week7.html">&larr; Week 7</a>
+  <a href="../week9/week9.html">Week 9 &rarr;</a>
+</div>
+
+</body>
+</html>

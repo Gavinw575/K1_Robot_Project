@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 9 — Reinforcement Learning Introduction</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week8/week8.html">&larr; Week 8</a>
+  <a href="../week10/week10.html">Week 10 &rarr;</a>
+</div>
+
+<h1 class="page-title">Week 9 — Reinforcement Learning Introduction</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Understand core RL concepts: agent, environment, reward, policy, episode</li>
+    <li>Explain the sim-to-real gap and domain randomization</li>
+    <li>Navigate the Isaac Lab and booster_train repository structure</li>
+    <li>Run a pre-trained walking policy in MuJoCo using booster_deploy</li>
+    <li>Understand how to modify the reward function</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. Reinforcement Learning Concepts</h2>
+
+<h3>1.1 The RL Loop</h3>
+
+<p>
+  In reinforcement learning an <strong>agent</strong> interacts with an
+  <strong>environment</strong> through a cycle of observations and actions:
+</p>
+
+<pre><span class="cm">At each time step t:</span>
+<span class="cm">  1. Environment sends observation o_t to the agent</span>
+<span class="cm">     (e.g., joint angles, IMU, foot contact states)</span>
+<span class="cm">  2. Agent selects action a_t using its policy π(a|o)</span>
+<span class="cm">     (e.g., joint torques or target joint angles)</span>
+<span class="cm">  3. Environment transitions to state s_{t+1}</span>
+<span class="cm">     (physics simulation advances by one timestep)</span>
+<span class="cm">  4. Environment returns reward r_t</span>
+<span class="cm">     (e.g., +1 for forward progress, -1 for falling)</span>
+<span class="cm">  5. Repeat until episode ends (fall, timeout, goal reached)</span>
+<span class="cm"></span>
+<span class="cm">Goal: learn policy π that maximises expected cumulative reward R = Σ r_t</span></pre>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Term</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Meaning</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">K1 Example</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Agent</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">The learner / decision maker</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">The neural network controlling the K1</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;">Environment</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">The world the agent acts in</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Isaac Lab / MuJoCo simulator</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Observation</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">What the agent sees</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Joint positions, velocities, IMU, commands</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;">Action</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">What the agent does</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Target joint positions (22 DOF)</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Reward</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Scalar feedback signal</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Forward velocity &minus; energy penalty &minus; fall penalty</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;">Policy</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">The agent's decision function</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A 3-layer MLP neural network</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Episode</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">One trial from start to termination</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Robot walks until it falls or 20 seconds pass</td>
+  </tr>
+</table>
+
+<!-- =========================================================== -->
+<h2>2. Sim-to-Real Gap and Domain Randomization</h2>
+
+<p>
+  A policy trained purely in simulation often fails on the real robot
+  because of the <strong>sim-to-real gap</strong>: differences between the
+  simulated and physical world.
+</p>
+
+<ul>
+  <li><strong>Contact dynamics</strong> — simulators approximate friction and deformation; real rubber feet behave differently</li>
+  <li><strong>Actuator dynamics</strong> — real motors have backlash, hysteresis, and latency not modeled in sim</li>
+  <li><strong>Sensor noise</strong> — real IMUs drift; sim IMUs are perfect</li>
+  <li><strong>Model errors</strong> — URDF mass/inertia values are approximate</li>
+</ul>
+
+<p>
+  <strong>Domain randomization</strong> counters this by adding random
+  variation during training: random floor friction, random joint
+  stiffness, random mass, random sensor noise. The policy learns to be
+  robust to all these variations, so the real robot falls within the
+  learned distribution.
+</p>
+
+<!-- =========================================================== -->
+<h2>3. Isaac Lab and booster_train Overview</h2>
+
+<pre><span class="cm"># Repository structure (simplified)</span>
+booster_train/
+├── tasks/
+│   ├── k1_mj2/           <span class="cm"># MuJoCo task definition for K1</span>
+│   │   ├── env.py        <span class="cm"># observation & action spaces</span>
+│   │   ├── rewards.py    <span class="cm"># reward function components</span>
+│   │   └── config.py     <span class="cm"># hyperparameters</span>
+├── train.py              <span class="cm"># main training script (Isaac Lab)</span>
+└── deploy/
+    └── run_policy.py     <span class="cm"># loads ONNX policy and runs on robot/MuJoCo</span></pre>
+
+<h3>3.1 Reward Function Structure</h3>
+
+<pre><span class="cm"># rewards.py excerpt — typical locomotion reward components</span>
+<span class="kw">def</span> <span class="fn">compute_reward</span>(env) -&gt; <span class="fn">dict</span>[str, float]:
+    <span class="kw">return</span> {
+        <span class="cm"># Encourage forward velocity matching a command</span>
+        <span class="st">"lin_vel_x"</span>:     <span class="num">2.0</span> * <span class="fn">exp</span>(-<span class="num">4</span> * (env.base_vel_x - env.cmd_vel_x)**<span class="num">2</span>),
+
+        <span class="cm"># Penalize lateral drift</span>
+        <span class="st">"lin_vel_y"</span>:    -<span class="num">0.5</span> * env.base_vel_y**<span class="num">2</span>,
+
+        <span class="cm"># Penalize excessive joint torques (energy efficiency)</span>
+        <span class="st">"torque"</span>:       -<span class="num">0.0002</span> * (env.torques**<span class="num">2</span>).<span class="fn">sum</span>(),
+
+        <span class="cm"># Penalize base acceleration (smooth motion)</span>
+        <span class="st">"base_accel"</span>:   -<span class="num">0.001</span> * (env.base_accel**<span class="num">2</span>).<span class="fn">sum</span>(),
+
+        <span class="cm"># Terminate episode if robot falls</span>
+        <span class="st">"fall"</span>:         -<span class="num">10.0</span> * env.is_fallen,
+
+        <span class="cm"># Keep upright orientation</span>
+        <span class="st">"orientation"</span>:   <span class="num">0.5</span> * (env.projected_gravity_z - <span class="num">1.0</span>)**<span class="num">2</span> * -<span class="num">1</span>,
+    }</pre>
+
+<!-- =========================================================== -->
+<h2>4. Running a Pre-Trained Policy in MuJoCo</h2>
+
+<p>
+  The <code>booster_deploy</code> package includes a pre-trained ONNX
+  walking policy that can be tested in MuJoCo before deploying to the
+  real robot:
+</p>
+
+<pre><span class="cm"># Clone the deploy repository</span>
+<span class="fn">git</span> clone https://github.com/BoosterRobotics/booster_deploy.git
+<span class="fn">cd</span> booster_deploy
+
+<span class="cm"># Create conda environment</span>
+<span class="fn">conda</span> create -n booster_deploy python=3.10
+<span class="fn">conda</span> activate booster_deploy
+<span class="fn">pip</span> install -r requirements.txt
+
+<span class="cm"># Run the k1_mj2 task in MuJoCo simulator</span>
+<span class="fn">python3</span> deploy/run_policy.py \
+    --task k1_mj2 \
+    --policy models/k1_walking_policy.onnx
+
+<span class="cm"># Controls (while MuJoCo window is focused):</span>
+<span class="cm">#   W/S = forward / backward</span>
+<span class="cm">#   A/D = turn left / right</span>
+<span class="cm">#   Space = stop</span></pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">MuJoCo viewer showing the K1 robot model executing the
+    pre-trained walking policy, with contact forces visualized as arrows on the feet.</div>
+</div>
+
+<h3>4.1 Comparing Sim vs. Real Behavior</h3>
+
+<p>
+  After running the policy in MuJoCo, observe:
+</p>
+<ul>
+  <li><strong>Gait cycle</strong> — does the sim gait look similar to the real robot's gait?</li>
+  <li><strong>Stability</strong> — how well does the sim handle disturbances?</li>
+  <li><strong>Speed</strong> — is the maximum velocity in sim achievable on hardware?</li>
+  <li><strong>Energy</strong> — sim typically underestimates real power consumption</li>
+</ul>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Side-by-side comparison: left — MuJoCo simulation gait sequence;
+    right — K1 real robot executing the same policy. Note differences in foot placement.</div>
+</div>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 9 (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>MuJoCo Policy Run.</strong> Run the <code>k1_mj2</code> task in MuJoCo using the pre-trained policy. Take a screenshot showing the robot walking in the simulator with at least one foot off the ground (mid-stride). Include the terminal output showing the task loaded successfully.</td>
+      <td class="task-pts">30</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Reward Function Modification.</strong> In <code>rewards.py</code>, increase the torque penalty coefficient from 0.0002 to 0.005. Re-run the policy (or retrain for a short time if resources permit). Describe: (a) how the gait changed, (b) why increasing the torque penalty should produce a more energy-efficient but possibly slower gait.</td>
+      <td class="task-pts">35</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Sim vs. Real Comparison.</strong> Compare the simulated gait to the real K1 robot walking. Document at least 3 observable differences (visual, behavioral, or from sensor data). Suggest one domain randomization technique that could reduce each difference.</td>
+      <td class="task-pts">35</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week8/week8.html">&larr; Week 8</a>
+  <a href="../week10/week10.html">Week 10 &rarr;</a>
+</div>
+
+</body>
+</html>

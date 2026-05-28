@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 6 — Voice Control Pipeline</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week5/week5.html">&larr; Week 5</a>
+  <a href="../week7/week7.html">Week 7 &rarr;</a>
+</div>
+
+<h1 class="page-title">Week 6 — Voice Control Pipeline</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Capture audio from the K1's 6-channel microphone array via sounddevice/ffmpeg</li>
+    <li>Transcribe speech to text using the Whisper model</li>
+    <li>Parse natural language commands using the Groq LLM API</li>
+    <li>Synthesize speech responses using Piper TTS</li>
+    <li>Integrate the full pipeline: voice-in &rarr; command &rarr; robot action &rarr; voice-out</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. Pipeline Overview</h2>
+
+<p>
+  The voice control pipeline has four stages:
+</p>
+
+<pre>Microphone Audio
+      |
+      v
+[Whisper STT]  &larr;&mdash; transcribes spoken words to text
+      |
+      v
+[Groq LLM]     &larr;&mdash; parses intent: COMMAND or REPLY
+      |
+      v
+[Robot Action] &larr;&mdash; executes walk, turn, stop, etc.
+      |
+      v
+[Piper TTS]    &larr;&mdash; speaks a confirmation back</pre>
+
+<!-- =========================================================== -->
+<h2>2. Speech to Text: Whisper</h2>
+
+<p>
+  OpenAI Whisper is an open-weight ASR (automatic speech recognition) model
+  that runs entirely locally &mdash; no internet required during inference.
+</p>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Model</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Parameters</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">VRAM</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Speed (RTF)</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Use Case</th>
+  </tr>
+  <tr><td style="border:1px solid #c87830;padding:5px 10px;">tiny</td><td style="border:1px solid #c87830;padding:5px 10px;">39 M</td><td style="border:1px solid #c87830;padding:5px 10px;">~1 GB</td><td style="border:1px solid #c87830;padding:5px 10px;">~32&times;</td><td style="border:1px solid #c87830;padding:5px 10px;">Very low latency, lower accuracy</td></tr>
+  <tr style="background-color:rgb(255,248,225);"><td style="border:1px solid #c87830;padding:5px 10px;">base</td><td style="border:1px solid #c87830;padding:5px 10px;">74 M</td><td style="border:1px solid #c87830;padding:5px 10px;">~1 GB</td><td style="border:1px solid #c87830;padding:5px 10px;">~16&times;</td><td style="border:1px solid #c87830;padding:5px 10px;"><strong>Recommended for K1</strong></td></tr>
+  <tr><td style="border:1px solid #c87830;padding:5px 10px;">small</td><td style="border:1px solid #c87830;padding:5px 10px;">244 M</td><td style="border:1px solid #c87830;padding:5px 10px;">~2 GB</td><td style="border:1px solid #c87830;padding:5px 10px;">~6&times;</td><td style="border:1px solid #c87830;padding:5px 10px;">Good balance for Jetson</td></tr>
+  <tr style="background-color:rgb(255,248,225);"><td style="border:1px solid #c87830;padding:5px 10px;">medium</td><td style="border:1px solid #c87830;padding:5px 10px;">769 M</td><td style="border:1px solid #c87830;padding:5px 10px;">~5 GB</td><td style="border:1px solid #c87830;padding:5px 10px;">~2&times;</td><td style="border:1px solid #c87830;padding:5px 10px;">High accuracy, slower</td></tr>
+</table>
+
+<pre><span class="cm"># Install dependencies on the laptop</span>
+<span class="fn">pip</span> install openai-whisper sounddevice scipy
+
+<span class="cm"># Quick transcription test</span>
+<span class="kw">import</span> whisper, sounddevice <span class="kw">as</span> sd, scipy.io.wavfile <span class="kw">as</span> wav
+
+model = whisper.<span class="fn">load_model</span>(<span class="st">"base"</span>, device=<span class="st">"cpu"</span>)
+
+<span class="cm"># Record 3 seconds of audio</span>
+fs = <span class="num">16000</span>
+audio = sd.<span class="fn">rec</span>(<span class="fn">int</span>(<span class="num">3</span> * fs), samplerate=fs, channels=<span class="num">1</span>, dtype=<span class="st">"float32"</span>)
+sd.<span class="fn">wait</span>()
+
+result = model.<span class="fn">transcribe</span>(audio.flatten(), language=<span class="st">"en"</span>)
+<span class="fn">print</span>(result[<span class="st">"text"</span>])</pre>
+
+<!-- =========================================================== -->
+<h2>3. Audio Capture from the Robot's 6-Channel Mic</h2>
+
+<p>
+  The K1's NationalChip 6-channel microphone array appears as an ALSA
+  device. We use ffmpeg to mix all 6 channels down to mono before Whisper:
+</p>
+
+<pre><span class="cm"># List audio capture devices on the robot</span>
+<span class="fn">arecord</span> -l
+
+<span class="cm"># Capture 3 seconds, mix 6 ch → mono, output 16 kHz WAV</span>
+<span class="fn">ffmpeg</span> -f alsa -ac <span class="num">6</span> -ar <span class="num">48000</span> -i hw:0,0 \
+       -ac <span class="num">1</span> -ar <span class="num">16000</span> -t <span class="num">3</span> /tmp/voice_input.wav -y
+
+<span class="cm"># Or use sounddevice in Python for in-process capture</span>
+<span class="kw">import</span> sounddevice <span class="kw">as</span> sd
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="kw">def</span> <span class="fn">record_mono</span>(duration_s=<span class="num">3</span>, fs=<span class="num">16000</span>):
+    audio = sd.<span class="fn">rec</span>(<span class="fn">int</span>(duration_s * fs),
+                   samplerate=fs, channels=<span class="num">6</span>, dtype=<span class="st">"float32"</span>)
+    sd.<span class="fn">wait</span>()
+    <span class="kw">return</span> audio.<span class="fn">mean</span>(axis=<span class="num">1</span>)   <span class="cm"># mix 6 channels to mono</span></pre>
+
+<!-- =========================================================== -->
+<h2>4. LLM Command Parsing with Groq</h2>
+
+<p>
+  Groq provides fast LLM inference (Llama3-8b at ~800 tokens/s) with a
+  free API tier — perfect for real-time command parsing with sub-second
+  latency.
+</p>
+
+<pre><span class="kw">import</span> os
+<span class="kw">from</span> groq <span class="kw">import</span> Groq
+
+client = <span class="cls">Groq</span>(api_key=os.environ[<span class="st">"GROQ_API_KEY"</span>])
+
+SYSTEM_PROMPT = <span class="st">"""
+You are a command parser for a humanoid robot named K1.
+The user will speak a command in natural language.
+You must respond with EXACTLY one line in this format:
+
+COMMAND:&lt;action&gt;:&lt;param&gt;
+or
+REPLY:&lt;spoken response&gt;
+
+Valid actions: walk_forward, walk_backward, turn_left, turn_right,
+               stop, sit, stand, wave, bow
+
+Examples:
+  User: "walk forward two meters"   → COMMAND:walk_forward:2.0
+  User: "what is your name?"        → REPLY:My name is K1.
+  User: "turn right 90 degrees"     → COMMAND:turn_right:1.5708
+"""</span>
+
+<span class="kw">def</span> <span class="fn">parse_command</span>(transcript: str) -&gt; <span class="fn">tuple</span>[str, str]:
+    resp = client.chat.completions.<span class="fn">create</span>(
+        model=<span class="st">"llama3-8b-8192"</span>,
+        messages=[
+            {<span class="st">"role"</span>: <span class="st">"system"</span>, <span class="st">"content"</span>: SYSTEM_PROMPT},
+            {<span class="st">"role"</span>: <span class="st">"user"</span>,   <span class="st">"content"</span>: transcript}
+        ],
+        temperature=<span class="num">0.0</span>,
+        max_tokens=<span class="num">64</span>
+    )
+    line = resp.choices[<span class="num">0</span>].message.content.<span class="fn">strip</span>()
+    parts = line.<span class="fn">split</span>(<span class="st">":"</span>, <span class="num">2</span>)
+    <span class="kw">return</span> parts[<span class="num">0</span>], parts[<span class="num">1</span>] <span class="kw">if</span> <span class="fn">len</span>(parts) &gt; <span class="num">1</span> <span class="kw">else</span> line</pre>
+
+<!-- =========================================================== -->
+<h2>5. Text to Speech: Piper TTS</h2>
+
+<p>
+  Piper is a fast, local neural TTS engine. The <code>danny-low</code>
+  voice model produces natural-sounding male English speech at low latency.
+</p>
+
+<pre><span class="cm"># Install Piper</span>
+<span class="fn">pip</span> install piper-tts
+
+<span class="cm"># Download the danny-low voice model</span>
+<span class="fn">python3</span> -m piper.download --model en_US-danny-low
+
+<span class="cm"># Synthesize speech from text</span>
+<span class="kw">from</span> piper.voice <span class="kw">import</span> PiperVoice
+<span class="kw">import</span> sounddevice <span class="kw">as</span> sd
+
+voice = <span class="cls">PiperVoice</span>.<span class="fn">load</span>(<span class="st">"en_US-danny-low.onnx"</span>)
+
+<span class="kw">def</span> <span class="fn">speak</span>(text: str):
+    audio_bytes = <span class="fn">bytes</span>()
+    <span class="kw">for</span> chunk <span class="kw">in</span> voice.<span class="fn">synthesize_stream_raw</span>(text):
+        audio_bytes += chunk
+    <span class="kw">import</span> numpy <span class="kw">as</span> np
+    audio = np.<span class="fn">frombuffer</span>(audio_bytes, dtype=np.int16)
+    sd.<span class="fn">play</span>(audio, samplerate=<span class="num">22050</span>)
+    sd.<span class="fn">wait</span>()</pre>
+
+<!-- =========================================================== -->
+<h2>6. Complete Pipeline Integration</h2>
+
+<pre><span class="kw">import</span> time, whisper, sounddevice <span class="kw">as</span> sd
+<span class="kw">import</span> booster_robotics_sdk <span class="kw">as</span> sdk
+<span class="cm"># (imports from above sections...)</span>
+
+<span class="kw">def</span> <span class="fn">execute_command</span>(action: str, param: str, client):
+    <span class="cm">"""Dispatch parsed robot actions."""</span>
+    <span class="kw">if</span> action == <span class="st">"walk_forward"</span>:
+        dist = <span class="fn">float</span>(param)
+        t = dist / <span class="num">0.3</span>
+        t_end = time.<span class="fn">time</span>() + t
+        <span class="kw">while</span> time.<span class="fn">time</span>() &lt; t_end:
+            client.<span class="fn">Move</span>(<span class="num">0.3</span>, <span class="num">0</span>, <span class="num">0</span>); time.<span class="fn">sleep</span>(<span class="num">0.02</span>)
+    <span class="kw">elif</span> action == <span class="st">"turn_left"</span>:
+        rad = <span class="fn">float</span>(param)
+        t = rad / <span class="num">0.4</span>
+        t_end = time.<span class="fn">time</span>() + t
+        <span class="kw">while</span> time.<span class="fn">time</span>() &lt; t_end:
+            client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">0.4</span>); time.<span class="fn">sleep</span>(<span class="num">0.02</span>)
+    <span class="kw">elif</span> action == <span class="st">"stop"</span>:
+        client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>)
+    client.<span class="fn">Move</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>)   <span class="cm"># halt after command</span>
+
+<span class="kw">def</span> <span class="fn">voice_loop</span>(loco_client):
+    stt_model = whisper.<span class="fn">load_model</span>(<span class="st">"base"</span>)
+    <span class="fn">print</span>(<span class="st">"Voice pipeline ready. Speak a command..."</span>)
+    <span class="kw">while</span> <span class="kw">True</span>:
+        audio = <span class="fn">record_mono</span>(<span class="num">3</span>)
+        <span class="kw">if</span> audio.<span class="fn">max</span>() &lt; <span class="num">0.01</span>:       <span class="cm"># silence detected</span>
+            <span class="fn">print</span>(<span class="st">"[silence — waiting]"</span>)
+            <span class="kw">continue</span>
+        text = stt_model.<span class="fn">transcribe</span>(audio, language=<span class="st">"en"</span>)[<span class="st">"text"</span>]
+        <span class="fn">print</span>(<span class="st">f"Heard: {text}"</span>)
+        intent, param = <span class="fn">parse_command</span>(text)
+        <span class="kw">if</span> intent == <span class="st">"COMMAND"</span>:
+            <span class="fn">speak</span>(<span class="st">f"Executing {param}"</span>)
+            <span class="fn">execute_command</span>(param, <span class="st">""</span>, loco_client)
+        <span class="kw">else</span>:
+            <span class="fn">speak</span>(param)</pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Terminal showing the voice pipeline running: Whisper transcription
+    output, Groq-parsed COMMAND, and robot motion confirmation in the console log.</div>
+</div>
+
+<h2>7. PulseAudio vs ALSA on the Robot</h2>
+
+<p>
+  Ubuntu 22.04 on the Jetson uses PulseAudio by default. Piper TTS and
+  sounddevice may conflict if PulseAudio occupies the ALSA device:
+</p>
+
+<pre><span class="cm"># Check if PulseAudio is running</span>
+<span class="fn">pulseaudio</span> --check &amp;&amp; echo "PulseAudio running"
+
+<span class="cm"># Option A: use PulseAudio backend (recommended)</span>
+<span class="kw">export</span> PIPER_AUDIO_BACKEND=pulseaudio
+
+<span class="cm"># Option B: stop PulseAudio and use ALSA directly (may cause issues with other apps)</span>
+<span class="fn">pulseaudio</span> -k
+<span class="cm"># Then run your audio scripts</span>
+
+<span class="cm"># Option C: use pacmd to route to a specific sink</span>
+<span class="fn">pacmd</span> list-sinks</pre>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 6 (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>Complete Voice Pipeline.</strong> Build the full 4-stage pipeline (mic &rarr; Whisper &rarr; Groq &rarr; Piper &rarr; robot). Demonstrate it controlling the K1 with at least 3 spoken commands. Submit a terminal recording or video.</td>
+      <td class="task-pts">40</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>5+ Robot Commands.</strong> Implement at least 5 distinct robot actions in <code>execute_command()</code>: forward, backward, left turn, right turn, stop, and two additional creative commands of your choice (e.g., wave, bow, spin).</td>
+      <td class="task-pts">30</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Error Handling.</strong> Add robust error handling for: (a) no audio detected (silence), (b) Groq API timeout, (c) unrecognized command. Each case should speak an appropriate error message to the user via Piper TTS.</td>
+      <td class="task-pts">30</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week5/week5.html">&larr; Week 5</a>
+  <a href="../week7/week7.html">Week 7 &rarr;</a>
+</div>
+
+</body>
+</html>

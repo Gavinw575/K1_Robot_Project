@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Week 10 — Final Project</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="nav-bar">
+  <a href="../index.html">Home</a>
+  <a href="../week9/week9.html">&larr; Week 9</a>
+</div>
+
+<h1 class="page-title">Week 10 — Final Project</h1>
+
+<div class="objectives-box">
+  <strong>Learning Objectives</strong>
+  <ul>
+    <li>Integrate voice control, computer vision, and autonomous motion into one system</li>
+    <li>Produce clean, well-documented code in a public GitHub repository</li>
+    <li>Record a live demonstration video showing all required behaviors</li>
+    <li>Communicate your technical work in a written report and peer presentation</li>
+  </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>1. Integration Challenge</h2>
+
+<p>
+  The final project combines everything you have built over the course:
+</p>
+
+<ul>
+  <li><strong>Voice control</strong> (Week 6) — the robot must respond to spoken commands</li>
+  <li><strong>Computer vision</strong> (Week 5 or 8) — the camera must influence at least one decision</li>
+  <li><strong>Autonomous motion</strong> (Week 4, 7, or 8) — the robot must execute at least one fully autonomous behavior</li>
+</ul>
+
+<p>
+  You have flexibility in your implementation. Some example projects:
+</p>
+
+<ul>
+  <li><em>"Fetch the ball"</em> — voice command triggers autonomous ball detection and retrieval</li>
+  <li><em>"Follow me"</em> — YOLO person detection + proportional following + voice start/stop</li>
+  <li><em>"Security patrol"</em> — pre-planned route + fall-back to damping on voice "stop" + person alert</li>
+  <li><em>"Tour guide"</em> — voice-navigated waypoints + text-to-speech commentary at each stop</li>
+</ul>
+
+<!-- =========================================================== -->
+<h2>2. Demo Requirements</h2>
+
+<div class="steps">
+  <ol>
+    <li>
+      <strong>At least 3 distinct voice commands</strong> must cause observable
+      robot actions (not just a spoken reply). Examples:
+      "walk forward", "find the ball", "stop and wait", "turn around".
+    </li>
+    <li>
+      <strong>Camera-based decision</strong> — the robot must use the camera
+      to make at least one real-time decision. This could be: detecting a
+      specific object, avoiding an obstacle, tracking a person, or
+      identifying a color.
+    </li>
+    <li>
+      <strong>Autonomous behavior</strong> — after a trigger (voice or visual),
+      the robot must execute a multi-step autonomous behavior without
+      further human input. This runs for at least 10 seconds.
+    </li>
+    <li>
+      <strong>Safe shutdown</strong> — at any point a "stop" voice command or
+      Ctrl-C must gracefully stop all motion and return the robot to
+      kDamping mode.
+    </li>
+  </ol>
+</div>
+
+<!-- =========================================================== -->
+<h2>3. Architecture Sketch</h2>
+
+<pre><span class="cm"># Suggested node architecture for the final project</span>
+
+/booster_video_stream ─────&gt; [yolo_node]  ─────&gt; /detections
+/robot_interface/imu  ─────&gt; [safety_node] ────&gt; /fall_alert
+
+[voice_node] ──(text)──&gt; [command_parser] ──(action)──&gt; [motion_node]
+                                 ^
+                         /detections, /fall_alert
+                         (vision and safety can override commands)
+
+[motion_node] ──────────────────────────────────&gt; SDK / B1LocoClient</pre>
+
+<p>
+  Keep each node focused on one responsibility. Use ROS 2 topics to
+  pass data between them so each component is independently testable.
+</p>
+
+<!-- =========================================================== -->
+<h2>4. Repository Structure</h2>
+
+<pre>k1_final_project/
+├── README.md               <span class="cm"># overview, demo video link, setup instructions</span>
+├── requirements.txt        <span class="cm"># pip dependencies</span>
+├── launch/
+│   └── full_system.launch.py  <span class="cm"># launches all nodes</span>
+├── k1_project/
+│   ├── __init__.py
+│   ├── voice_node.py       <span class="cm"># Whisper + Groq + Piper</span>
+│   ├── vision_node.py      <span class="cm"># YOLO subscriber</span>
+│   ├── safety_node.py      <span class="cm"># fall detection</span>
+│   └── motion_node.py      <span class="cm"># SDK locomotion</span>
+├── models/
+│   └── en_US-danny-low.onnx
+└── demo/
+    └── demo_video.mp4      <span class="cm"># or link in README</span></pre>
+
+<!-- =========================================================== -->
+<h2>5. README Requirements</h2>
+
+<p>Your <code>README.md</code> must include:</p>
+
+<ul>
+  <li><strong>Project title and description</strong> — what does your system do?</li>
+  <li><strong>Demo video link</strong> — YouTube, Google Drive, or embedded GIF</li>
+  <li><strong>System diagram</strong> — show how the nodes connect</li>
+  <li><strong>Setup instructions</strong> — how to install dependencies and run</li>
+  <li><strong>Known limitations</strong> — what does your system not handle well?</li>
+  <li><strong>Future work</strong> — one or two improvements you would make with more time</li>
+</ul>
+
+<!-- =========================================================== -->
+<h2>6. Technical Report Outline</h2>
+
+<p>
+  The technical report should be 1,500–2,500 words and cover:
+</p>
+
+<ol>
+  <li><strong>Introduction</strong> — what problem are you solving and why is it interesting?</li>
+  <li><strong>System Design</strong> — architecture diagram, node descriptions, data flow</li>
+  <li><strong>Implementation Details</strong> — key algorithms, parameter choices, and why</li>
+  <li><strong>Results</strong> — what worked, what didn't, measured performance (FPS, latency, success rate)</li>
+  <li><strong>Challenges &amp; Solutions</strong> — at least 2 technical obstacles you overcame</li>
+  <li><strong>Conclusion</strong> — what you learned and what you would do differently</li>
+</ol>
+
+<!-- =========================================================== -->
+<h2>7. Grading Rubric</h2>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Final project demo — K1 robot responding to a voice command,
+    detecting an object with YOLO, and autonomously approaching it.</div>
+</div>
+
+<pre><span class="cm"># Checklist before submission</span>
+[ ] GitHub repo is public and has a README with demo video link
+[ ] At least 3 voice commands trigger robot actions
+[ ] Camera used for at least one autonomous decision
+[ ] At least one 10+ second autonomous behavior
+[ ] "Stop" command (or Ctrl-C) safely returns robot to kDamping
+[ ] Technical report 1500-2500 words with all 6 sections
+[ ] Peer presentation slides prepared (5-7 minutes)</pre>
+
+<!-- =========================================================== -->
+<div class="tasks-section">
+  <h2>Tasks — Week 10 Final Project (100 points total)</h2>
+  <table>
+    <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
+    <tr>
+      <td>1</td>
+      <td>
+        <strong>Working Demo Video.</strong> Record a video of the K1 robot:
+        <ul>
+          <li>Responding to at least 3 different voice commands</li>
+          <li>Using the camera to make at least 1 real-time decision</li>
+          <li>Executing at least 1 fully autonomous behavior lasting &ge;10 seconds</li>
+          <li>Responding to a "stop" command gracefully</li>
+        </ul>
+        Video must show the robot and terminal output simultaneously.
+      </td>
+      <td class="task-pts">40</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>GitHub Repository.</strong> Public GitHub repo with: complete source code, <code>requirements.txt</code>, clear README with setup instructions and a link to the demo video, and a system architecture diagram.</td>
+      <td class="task-pts">20</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Technical Report.</strong> 1,500–2,500 word report covering all 6 sections: Introduction, System Design, Implementation, Results, Challenges, Conclusion. Include at least 2 figures (architecture diagram, results plot).</td>
+      <td class="task-pts">25</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>Peer Presentation.</strong> 5–7 minute live presentation to the class. Must include: project motivation, system overview, live demo or video replay, at least one thing that didn't work and how you diagnosed it, and a Q&amp;A period.</td>
+      <td class="task-pts">15</td>
+    </tr>
+    <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+      <td colspan="2">Total</td>
+      <td class="task-pts" style="color:#fff;">100</td>
+    </tr>
+  </table>
+</div>
+
+<hr>
+<p style="text-align:center; font-weight:bold;">
+  Congratulations on completing the Booster K1 Humanoid Robot Course!
+</p>
+
+<div class="nav-bar" style="margin-top:30px;">
+  <a href="../index.html">Home</a>
+  <a href="../week9/week9.html">&larr; Week 9</a>
+</div>
+
+</body>
+</html>
