@@ -19,21 +19,80 @@
 <div class="objectives-box">
   <strong>Learning Objectives</strong>
   <ul>
-    <li>Understand the core ROS 2 concepts: nodes, topics, messages, and services</li>
+    <li>See live robot data streaming before touching any theory</li>
+    <li>Understand core ROS 2 concepts: nodes, topics, messages, and services</li>
     <li>Configure FastDDS for Ethernet-based cross-machine communication</li>
-    <li>Use <code>ros2 topic</code> commands to inspect live robot data</li>
+    <li>Visualise the running robot's node graph with rqt_graph</li>
+    <li>Write a Python ROS 2 subscriber node from scratch</li>
+    <li>Diagnose DDS discovery failures by intentionally breaking the config</li>
     <li>Record and replay sensor data with rosbag2</li>
   </ul>
+</div>
+
+<!-- =========================================================== -->
+<h2>0. Try This First — Before Any Theory</h2>
+
+<p>
+  Forget the slides. SSH into the robot, run two commands, and watch
+  what happens. Then we'll explain everything you see.
+</p>
+
+<div class="steps">
+  <ol>
+    <li>SSH into the robot: <code>ssh booster@192.168.10.102</code></li>
+    <li>Source ROS 2: <code>source /opt/ros/humble/setup.bash</code></li>
+    <li>Run this:</li>
+  </ol>
+</div>
+
+<pre><span class="cm"># See every data stream the robot is producing right now</span>
+<span class="fn">ros2</span> topic list</pre>
+
+<p>
+  You'll see 20–30 topic names scroll past. Every one of those is a live
+  data stream. Now pick the most interesting-sounding one and look inside it:
+</p>
+
+<pre><span class="cm"># Watch raw data pouring off the robot's camera (Ctrl-C to stop)</span>
+<span class="fn">ros2</span> topic echo /booster_video_stream</pre>
+
+<p>
+  That wall of numbers scrolling past? That's the robot's live camera feed —
+  every pixel of every frame encoded as bytes, streaming at ~30 Hz over your
+  Ethernet cable from the Jetson Orin to your terminal. <em>Now</em> let's
+  understand what you're actually looking at.
+</p>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Terminal showing <code>ros2 topic echo /booster_video_stream</code>
+    with the raw CompressedImage message fields scrolling — header timestamp,
+    format: "jpeg", and the data byte array.</div>
+</div>
+
+<div class="tip-box">
+  <strong>Why is it unreadable?</strong> The camera topic carries
+  <em>compressed JPEG bytes</em> — binary data that makes no sense as
+  text. Later in Week 3 we'll decode it into actual images. For now, the
+  point is that the data is <em>there</em>, flowing live from the robot.
 </div>
 
 <!-- =========================================================== -->
 <h2>1. What Is ROS 2?</h2>
 
 <p>
-  ROS 2 (Robot Operating System 2) is a middleware framework for building
-  robot software. Unlike ROS 1, ROS 2 is built on the DDS (Data Distribution
-  Service) standard, giving it real-time capabilities, multi-robot support,
-  and better security.
+  What you just saw is ROS 2 in action. ROS 2 (Robot Operating System 2)
+  is a middleware framework that lets independent programs — running on
+  different machines, written in different languages — share data over a
+  network as if they were all in the same process.
+</p>
+
+<p>
+  Unlike ROS 1, ROS 2 is built on the DDS (Data Distribution Service)
+  standard, giving it real-time capabilities, multi-robot support, and
+  better security. The robot runs a collection of ROS 2 <em>nodes</em>
+  continuously; your laptop can subscribe to any of their output topics
+  over the Ethernet cable.
 </p>
 
 <h3>1.1 Core Concepts</h3>
@@ -42,47 +101,87 @@
   <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
     <th style="border:1px solid #c87830;padding:6px 10px;">Concept</th>
     <th style="border:1px solid #c87830;padding:6px 10px;">Description</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">K1 Example</th>
   </tr>
   <tr>
     <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Node</strong></td>
-    <td style="border:1px solid #c87830;padding:5px 10px;">A single executable process. Each node has a specific responsibility (e.g., camera driver, controller, planner).</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A single executable process with one responsibility.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Camera driver, walk controller, IMU reader</td>
   </tr>
   <tr style="background-color:rgb(255,248,225);">
     <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Topic</strong></td>
-    <td style="border:1px solid #c87830;padding:5px 10px;">A named communication channel. Nodes <em>publish</em> data onto topics and <em>subscribe</em> to receive it. Topics are asynchronous and fire-and-forget.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A named channel. Publishers push data; subscribers receive it. Asynchronous — sender doesn't wait for a reader.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>/booster_video_stream</code>, <code>/low_state</code></td>
   </tr>
   <tr>
     <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Message</strong></td>
-    <td style="border:1px solid #c87830;padding:5px 10px;">A typed data structure sent over a topic. Examples: <code>sensor_msgs/Image</code>, <code>geometry_msgs/Twist</code>.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">A typed data structure sent over a topic.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>sensor_msgs/CompressedImage</code>, <code>sensor_msgs/Imu</code></td>
   </tr>
   <tr style="background-color:rgb(255,248,225);">
     <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Service</strong></td>
-    <td style="border:1px solid #c87830;padding:5px 10px;">A request/response communication pattern. The client sends a request and blocks until the server replies. Used for discrete actions.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Request/response — caller blocks until the server replies. For discrete one-off actions.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Query robot mode, trigger a behaviour</td>
   </tr>
   <tr>
     <td style="border:1px solid #c87830;padding:5px 10px;"><strong>Action</strong></td>
-    <td style="border:1px solid #c87830;padding:5px 10px;">Like a service but with feedback streaming during long-running tasks (e.g., navigate to a goal).</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Like a service but streams feedback during long-running tasks.</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Navigate to a waypoint, execute a gait</td>
   </tr>
 </table>
 
-<div class="screenshot">
-  <div class="ss-label">[Screenshot Placeholder]</div>
-  <div class="ss-caption">ROS 2 node graph for the K1 robot showing camera, state publisher,
-    and controller nodes connected via topics.</div>
-</div>
-
 <!-- =========================================================== -->
-<h2>2. FastDDS Configuration for Ethernet</h2>
+<h2>2. Seeing the Node Graph with rqt_graph</h2>
 
 <p>
-  By default, ROS 2 uses UDP multicast for peer discovery. On direct
-  Ethernet links (without a multicast-capable switch) this fails silently.
-  FastDDS with a static peer list solves this.
+  <code>rqt_graph</code> draws every running node and every topic as a
+  live graph. It's the fastest way to understand what a robot is actually
+  doing without reading any code.
 </p>
 
-<h3>2.1 Create the FastDDS Configuration File</h3>
+<pre><span class="cm"># On your laptop (with FastDDS configured — see Section 3)</span>
+<span class="fn">rqt_graph</span></pre>
 
-<p>On your <strong>laptop</strong>, create <code>~/fastdds_k1.xml</code>:</p>
+<div class="steps">
+  <ol>
+    <li>Run <code>rqt_graph</code> on your laptop.</li>
+    <li>In the toolbar, select <strong>Nodes/Topics (all)</strong> from the dropdown.</li>
+    <li>Uncheck <em>Hide dead sinks</em> and <em>Hide leaf topics</em> to see everything.</li>
+    <li>Click <strong>Refresh</strong> (the circular arrow button).</li>
+    <li>Ovals are nodes. Rectangles are topics. Arrows show data flow direction.</li>
+  </ol>
+</div>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">rqt_graph showing the K1 robot's full node graph — camera driver,
+    walk controller, IMU node, and state publisher connected by labelled topic arrows.
+    At least 5 nodes and 8 topics visible.</div>
+</div>
+
+<p>
+  Look for these nodes in the graph and trace the data flow:
+</p>
+<ul>
+  <li>Which node publishes <code>/booster_video_stream</code>?</li>
+  <li>Which node publishes <code>/low_state</code>?</li>
+  <li>Are there any nodes with no subscribers (dead ends)?</li>
+</ul>
+
+<!-- =========================================================== -->
+<h2>3. FastDDS Configuration for Ethernet</h2>
+
+<p>
+  By default, ROS 2 uses UDP <em>multicast</em> for peer discovery — one
+  machine broadcasts "I'm here!" and all others on the network hear it.
+  On a direct Ethernet cable or an unmanaged switch, multicast is often
+  blocked and the two machines never find each other. FastDDS with a
+  static peer list bypasses this entirely.
+</p>
+
+<h3>3.1 Create the FastDDS Configuration File</h3>
+
+<p>On your <strong>laptop</strong>, create <code>~/robots/k1/config/fastdds_k1.xml</code>:</p>
 
 <pre><span class="op">&lt;?</span><span class="kw">xml</span> version=<span class="st">"1.0"</span> encoding=<span class="st">"UTF-8"</span> <span class="op">?&gt;</span>
 <span class="op">&lt;</span><span class="cls">profiles</span> xmlns=<span class="st">"http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles"</span><span class="op">&gt;</span>
@@ -109,89 +208,347 @@
   <span class="op">&lt;/</span><span class="cls">participant</span><span class="op">&gt;</span>
 <span class="op">&lt;/</span><span class="cls">profiles</span><span class="op">&gt;</span></pre>
 
-<h3>2.2 Set Environment Variables</h3>
+<h3>3.2 Set Environment Variables</h3>
 
-<p>
-  Add the following lines to your laptop's <code>~/.bashrc</code> (and
-  <code>source ~/.bashrc</code> afterward):
-</p>
+<p>Add to your laptop's <code>~/.bashrc</code> and run <code>source ~/.bashrc</code>:</p>
 
 <pre><span class="cm"># ROS 2 environment — add to ~/.bashrc on your laptop</span>
 <span class="kw">source</span> /opt/ros/humble/setup.bash
-
-<span class="cm"># Use the same domain as the robot</span>
 <span class="kw">export</span> <span class="cls">ROS_DOMAIN_ID</span>=<span class="num">0</span>
-
-<span class="cm"># Force FastDDS as the RMW implementation</span>
 <span class="kw">export</span> <span class="cls">RMW_IMPLEMENTATION</span>=rmw_fastrtps_cpp
+<span class="kw">export</span> <span class="cls">FASTRTPS_DEFAULT_PROFILES_FILE</span>=~/robots/k1/config/fastdds_k1.xml</pre>
 
-<span class="cm"># Point FastDDS to the static peer config</span>
-<span class="kw">export</span> <span class="cls">FASTRTPS_DEFAULT_PROFILES_FILE</span>=~/fastdds_k1.xml</pre>
-
-<h3>2.3 DDS vs WiFi Discovery — Why the XML File Is Needed</h3>
+<h3>3.3 Why the XML File Is Needed (DDS vs WiFi Discovery)</h3>
 
 <p>
-  ROS 2 DDS discovery works by broadcasting "participant announcement"
-  UDP packets. On a WiFi network these broadcasts reach all devices
-  automatically. On a direct Ethernet cable or an unmanaged switch the
-  multicast packets may not be forwarded, so the two machines never find
-  each other. The XML file hard-codes the robot's IP as an
-  <em>initial peer</em>, bypassing multicast discovery entirely.
+  ROS 2 DDS discovery broadcasts "participant announcement" UDP packets.
+  On WiFi every device on the subnet hears the broadcast automatically.
+  On a direct Ethernet cable or an unmanaged switch, multicast packets are
+  often not forwarded — the two machines never discover each other and
+  <code>ros2 topic list</code> returns nothing from your laptop.
+</p>
+<p>
+  The XML file hard-codes the robot's IP as an <em>initial peer</em>, so
+  your laptop sends the discovery packet directly to <code>192.168.10.102</code>
+  instead of multicasting. No multicast needed — discovery always works.
 </p>
 
 <!-- =========================================================== -->
-<h2>3. Topic Commands</h2>
+<h2>4. Topic Commands Reference</h2>
 
 <pre><span class="cm"># List all active topics</span>
 <span class="fn">ros2</span> topic list
 
-<span class="cm"># Echo live messages on a topic (Ctrl-C to stop)</span>
+<span class="cm"># Echo live messages (Ctrl-C to stop)</span>
 <span class="fn">ros2</span> topic echo /low_state
 
-<span class="cm"># Show message type and connection info</span>
+<span class="cm"># Show message type, publisher count, subscriber count</span>
 <span class="fn">ros2</span> topic info /booster_video_stream
 
-<span class="cm"># Measure publish rate (Hz)</span>
+<span class="cm"># Measure publish rate in Hz</span>
 <span class="fn">ros2</span> topic hz /robot_interface/imu
 
-<span class="cm"># Show full message schema</span>
-<span class="fn">ros2</span> interface show sensor_msgs/msg/Imu</pre>
+<span class="cm"># Show the full message schema (field names and types)</span>
+<span class="fn">ros2</span> interface show sensor_msgs/msg/Imu
+
+<span class="cm"># Echo just one message then exit</span>
+<span class="fn">ros2</span> topic echo --once /low_state</pre>
 
 <div class="screenshot">
   <div class="ss-label">[Screenshot Placeholder]</div>
   <div class="ss-caption">Terminal output of <code>ros2 topic info /booster_video_stream</code>
-    showing publisher count, subscriber count, and message type.</div>
+    from the laptop, showing Type, Publisher count: 1, Subscription count: 0.</div>
 </div>
 
 <!-- =========================================================== -->
-<h2>4. Recording and Playing Back Rosbags</h2>
+<h2>5. Live Data Challenge</h2>
 
 <p>
-  Rosbag2 lets you capture all topic data to disk and replay it later —
-  invaluable for offline algorithm development.
+  Don't look these up — figure them out by exploring
+  <code>ros2 topic list</code>, <code>ros2 topic echo</code>, and
+  <code>ros2 topic hz</code>. Use <code>ros2 interface show</code>
+  to understand message fields when you need to.
 </p>
 
-<pre><span class="cm"># Record all topics for 10 seconds into a bag named k1_test</span>
-<span class="fn">ros2</span> bag record -o k1_test --duration <span class="num">10</span> -a
+<div class="steps">
+  <ol>
+    <li>
+      <strong>Find the head orientation topic.</strong>
+      The K1's head pose is published somewhere. Find the topic name,
+      echo one message, and identify which field contains the yaw (left/right) angle.
+      <em>Hint: run <code>ros2 topic list | grep head</code></em>
+    </li>
+    <li>
+      <strong>Measure the camera frame rate.</strong>
+      Use <code>ros2 topic hz</code> on the camera topic and run it for
+      10 seconds. What is the actual publish rate? Is it stable or does
+      it fluctuate? Record the min, max, and mean Hz.
+    </li>
+    <li>
+      <strong>Count the robot's joints.</strong>
+      Echo <code>/joint_states</code> once (<code>--once</code> flag) and
+      count how many joint names are listed. Does the number match the
+      advertised 22 DOF? If not, explain why some joints may be missing.
+    </li>
+    <li>
+      <strong>Find a topic that changes when you move the robot's head.</strong>
+      With the robot in damping mode, gently move the head by hand while
+      watching topic data. Which topic values change? Which stay constant?
+      List at least two topics that respond and two that don't.
+    </li>
+    <li>
+      <strong>Find the walking state topic.</strong>
+      There is a topic that tells you the robot's current locomotion mode
+      (standing, walking, damping, etc.). Find it, echo it, and report
+      the field name and value when the robot is in damping mode.
+    </li>
+  </ol>
+</div>
 
-<span class="cm"># List what was recorded</span>
-<span class="fn">ros2</span> bag info k1_test
-
-<span class="cm"># Replay the bag at normal speed</span>
-<span class="fn">ros2</span> bag play k1_test
-
-<span class="cm"># Replay at half speed</span>
-<span class="fn">ros2</span> bag play k1_test --rate <span class="num">0.5</span>
-
-<span class="cm"># Record only the camera and IMU topics</span>
-<span class="fn">ros2</span> bag record -o k1_sensors \
-    /booster_video_stream \
-    /robot_interface/imu</pre>
+<div class="tip-box">
+  <strong>Useful trick:</strong> <code>ros2 topic list | grep -i walk</code>,
+  <code>ros2 topic list | grep -i state</code>, and
+  <code>ros2 topic list | grep -i mode</code> will narrow the search quickly.
+</div>
 
 <div class="screenshot">
   <div class="ss-label">[Screenshot Placeholder]</div>
-  <div class="ss-caption">Output of <code>ros2 bag info k1_test</code> showing duration,
-    topic names, message counts, and file size.</div>
+  <div class="ss-caption">Terminal split-screen: left side shows <code>ros2 topic hz
+    /booster_video_stream</code> running for 10 seconds displaying min/max/mean Hz;
+    right side shows <code>ros2 topic echo --once /joint_states</code> with all joint
+    names listed.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>6. Python Exercise — Writing a ROS 2 Subscriber Node</h2>
+
+<p>
+  Reading data from the terminal is useful for debugging but eventually
+  you want to write code that <em>reacts</em> to it. Here's your first
+  ROS 2 Python node: it subscribes to the head pose topic and prints
+  a plain-English description of where the robot's head is pointing.
+</p>
+
+<h3>6.1 head_reporter.py — Full Code with Explanation</h3>
+
+<pre><span class="cm">#!/usr/bin/env python3</span>
+<span class="cm"># head_reporter.py — prints head direction in plain English</span>
+
+<span class="kw">import</span> rclpy                          <span class="cm"># ROS 2 Python client library</span>
+<span class="kw">from</span> rclpy.node <span class="kw">import</span> Node           <span class="cm"># base class for all ROS 2 nodes</span>
+<span class="kw">from</span> geometry_msgs.msg <span class="kw">import</span> Pose    <span class="cm"># message type for head_pose topic</span>
+<span class="kw">import</span> math
+
+<span class="kw">class</span> <span class="cls">HeadReporter</span>(Node):
+    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="kw">self</span>):
+        <span class="cm"># Every node needs a unique name — used in rqt_graph</span>
+        <span class="fn">super</span>().<span class="fn">__init__</span>(<span class="st">"head_reporter"</span>)
+
+        <span class="cm"># create_subscription(msg_type, topic, callback, queue_size)</span>
+        <span class="kw">self</span>.sub = <span class="kw">self</span>.<span class="fn">create_subscription</span>(
+            Pose,
+            <span class="st">"/head_pose"</span>,
+            <span class="kw">self</span>.on_pose,      <span class="cm"># called every time a message arrives</span>
+            <span class="num">10</span>                 <span class="cm"># keep at most 10 messages in the queue</span>
+        )
+        <span class="kw">self</span>.last_report = <span class="st">""</span>  <span class="cm"># avoid printing the same line repeatedly</span>
+
+    <span class="kw">def</span> <span class="fn">on_pose</span>(<span class="kw">self</span>, msg: Pose):
+        <span class="cm"># Extract yaw and pitch from the quaternion orientation</span>
+        q = msg.orientation
+        <span class="cm"># Convert quaternion → yaw (left/right) and pitch (up/down)</span>
+        yaw   = <span class="fn">math.atan2</span>(<span class="num">2</span>*(q.w*q.z + q.x*q.y),
+                            <span class="num">1</span> - <span class="num">2</span>*(q.y*q.y + q.z*q.z))
+        pitch = <span class="fn">math.asin</span>(<span class="fn">max</span>(-<span class="num">1</span>, <span class="fn">min</span>(<span class="num">1</span>, <span class="num">2</span>*(q.w*q.y - q.z*q.x))))
+
+        yaw_deg   = <span class="fn">math.degrees</span>(yaw)
+        pitch_deg = <span class="fn">math.degrees</span>(pitch)
+
+        <span class="cm"># Map angles to plain English</span>
+        <span class="kw">if</span>   yaw_deg &gt;  <span class="num">15</span>:  horiz = <span class="st">"LEFT"</span>
+        <span class="kw">elif</span> yaw_deg &lt; -<span class="num">15</span>:  horiz = <span class="st">"RIGHT"</span>
+        <span class="kw">else</span>:                  horiz = <span class="st">"CENTER"</span>
+
+        <span class="kw">if</span>   pitch_deg &gt;  <span class="num">10</span>: vert = <span class="st">"UP"</span>
+        <span class="kw">elif</span> pitch_deg &lt; -<span class="num">10</span>: vert = <span class="st">"DOWN"</span>
+        <span class="kw">else</span>:                   vert = <span class="st">"LEVEL"</span>
+
+        report = <span class="st">f"Robot head is pointing {horiz} and {vert} "</span> \
+                 <span class="st">f"(yaw={yaw_deg:.1f}° pitch={pitch_deg:.1f}°)"</span>
+
+        <span class="cm"># Only print when the direction actually changes</span>
+        <span class="kw">if</span> report != <span class="kw">self</span>.last_report:
+            <span class="fn">print</span>(report)
+            <span class="kw">self</span>.last_report = report
+
+<span class="kw">def</span> <span class="fn">main</span>():
+    rclpy.<span class="fn">init</span>()                       <span class="cm"># start the ROS 2 runtime</span>
+    node = <span class="cls">HeadReporter</span>()
+    <span class="kw">try</span>:
+        rclpy.<span class="fn">spin</span>(node)               <span class="cm"># loop forever, calling callbacks</span>
+    <span class="kw">except</span> KeyboardInterrupt:
+        <span class="fn">pass</span>
+    <span class="kw">finally</span>:
+        node.<span class="fn">destroy_node</span>()
+        rclpy.<span class="fn">shutdown</span>()
+
+<span class="kw">if</span> __name__ == <span class="st">"__main__"</span>:
+    <span class="fn">main</span>()</pre>
+
+<h3>6.2 Running the Node</h3>
+
+<div class="steps">
+  <ol>
+    <li>Save the script: <code>nano ~/head_reporter.py</code> (paste and save)</li>
+    <li>Run it: <code>python3 ~/head_reporter.py</code></li>
+    <li>In a second terminal, manually move the robot's head (it should be in damping mode).</li>
+    <li>Watch the direction labels update in real-time.</li>
+    <li>Press Ctrl-C to stop cleanly.</li>
+  </ol>
+</div>
+
+<p>
+  Expected output when you tilt the head left then right:
+</p>
+
+<pre><span class="cm">Robot head is pointing CENTER and LEVEL (yaw=2.1° pitch=-0.4°)</span>
+<span class="cm">Robot head is pointing LEFT and LEVEL (yaw=18.3° pitch=-0.2°)</span>
+<span class="cm">Robot head is pointing LEFT and UP (yaw=21.7° pitch=12.1°)</span>
+<span class="cm">Robot head is pointing CENTER and LEVEL (yaw=3.0° pitch=0.9°)</span>
+<span class="cm">Robot head is pointing RIGHT and LEVEL (yaw=-16.4° pitch=1.2°)</span></pre>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Terminal running head_reporter.py with 5–6 lines of output showing
+    direction changing as the robot's head is moved manually. rqt_graph in background
+    showing the head_reporter node connected to /head_pose.</div>
+</div>
+
+<!-- =========================================================== -->
+<h2>7. Break It On Purpose — Diagnosing DDS Failures</h2>
+
+<p>
+  The best way to understand why the FastDDS XML file matters is to
+  remove it and watch everything break. Do this deliberately in a
+  controlled way — you'll remember it far better than any explanation.
+</p>
+
+<div class="steps">
+  <ol>
+    <li>
+      <strong>Confirm topics are visible.</strong>
+      Run <code>ros2 topic list</code> — you should see the full K1 topic list.
+    </li>
+    <li>
+      <strong>Switch to the wrong domain ID.</strong>
+      In a new terminal (don't change your main terminal):
+<pre><span class="kw">export</span> <span class="cls">ROS_DOMAIN_ID</span>=<span class="num">1</span>   <span class="cm"># robot uses 0; this terminal now lives in a different universe</span>
+<span class="fn">ros2</span> topic list</pre>
+      Result: empty list. The robot's topics have vanished.
+    </li>
+    <li>
+      <strong>Break the FastDDS XML path.</strong>
+      In another new terminal:
+<pre><span class="kw">export</span> <span class="cls">FASTRTPS_DEFAULT_PROFILES_FILE</span>=/tmp/does_not_exist.xml
+<span class="fn">ros2</span> topic list</pre>
+      Result: empty list (or a warning then empty). Without the static peer
+      address, your laptop falls back to multicast discovery which fails
+      on the direct Ethernet link.
+    </li>
+    <li>
+      <strong>Fix it and verify recovery.</strong>
+      Open a fresh terminal (inherits the correct <code>~/.bashrc</code>) and
+      run <code>ros2 topic list</code> again — topics reappear immediately.
+    </li>
+    <li>
+      <strong>Document the failure modes.</strong>
+      Take a screenshot of each broken state and the corrected state.
+    </li>
+  </ol>
+</div>
+
+<div class="warning-box">
+  <strong>&#9888; Only break it in a new terminal</strong> — the environment
+  variable change only affects that shell session. Your main working terminal
+  is unaffected. Never <code>export</code> the wrong values in the terminal
+  you're actively using for robot commands.
+</div>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Side-by-side: left terminal has <code>ROS_DOMAIN_ID=1</code> and
+    shows empty <code>ros2 topic list</code>; right terminal has correct config and shows
+    the full topic list. Same machine, same robot, different domain ID.</div>
+</div>
+
+<h3>7.1 DDS Failure Modes Summary</h3>
+
+<table style="border-collapse:collapse; width:100%; margin-bottom:14px;">
+  <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
+    <th style="border:1px solid #c87830;padding:6px 10px;">Symptom</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Most Likely Cause</th>
+    <th style="border:1px solid #c87830;padding:6px 10px;">Fix</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>ros2 topic list</code> is empty</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Wrong <code>ROS_DOMAIN_ID</code>, missing XML file, or wrong IP in XML</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>echo $ROS_DOMAIN_ID</code> (must be 0); check <code>$FASTRTPS_DEFAULT_PROFILES_FILE</code> exists</td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;">Topics appear from robot but not laptop's own nodes</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Firewall blocking DDS ports (7400–7500 UDP)</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>sudo ufw allow 7400:7500/udp</code></td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Topics visible but <code>echo</code> shows no data</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">QoS mismatch (robot publishes Best Effort; subscriber expects Reliable)</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;"><code>ros2 topic echo --qos-reliability best_effort /topic</code></td>
+  </tr>
+  <tr style="background-color:rgb(255,248,225);">
+    <td style="border:1px solid #c87830;padding:5px 10px;">Intermittent data drops</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">High CPU on Jetson or Ethernet cable issue</td>
+    <td style="border:1px solid #c87830;padding:5px 10px;">Check <code>ros2 topic hz</code> for irregular timing; try a different cable</td>
+  </tr>
+</table>
+
+<!-- =========================================================== -->
+<h2>8. Recording and Playing Back Rosbags</h2>
+
+<p>
+  Rosbag2 captures a snapshot of every topic to disk. You can replay it
+  later as if the robot were live — invaluable for offline development
+  when the robot isn't available.
+</p>
+
+<pre><span class="cm"># Record all topics for 10 seconds</span>
+<span class="fn">ros2</span> bag record -o k1_test --duration <span class="num">10</span> -a
+
+<span class="cm"># See what was captured</span>
+<span class="fn">ros2</span> bag info k1_test
+
+<span class="cm"># Replay at normal speed (topics republish as if live)</span>
+<span class="fn">ros2</span> bag play k1_test
+
+<span class="cm"># Replay at half speed — useful for debugging fast events</span>
+<span class="fn">ros2</span> bag play k1_test --rate <span class="num">0.5</span>
+
+<span class="cm"># Record only the sensors you care about (saves disk space)</span>
+<span class="fn">ros2</span> bag record -o k1_sensors \
+    /booster_video_stream \
+    /robot_interface/imu \
+    /low_state</pre>
+
+<div class="tip-box">
+  <strong>Tip:</strong> The camera topic alone generates ~2–5 MB/s.
+  A 10-second full recording can be 50–100 MB. Always record only the
+  topics you need, or use <code>--duration</code> to limit the time.
+</div>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">Output of <code>ros2 bag info k1_test</code> showing: duration,
+    start/end timestamps, total message count, and per-topic message counts with
+    message types.</div>
 </div>
 
 <!-- =========================================================== -->
@@ -201,23 +558,70 @@
     <tr><th>#</th><th>Task</th><th class="task-pts">Points</th></tr>
     <tr>
       <td>1</td>
-      <td><strong>Echo Topic Info.</strong> Run <code>ros2 topic info /booster_video_stream</code> from your laptop (not from the robot) and take a screenshot proving cross-machine DDS discovery is working.</td>
-      <td class="task-pts">25</td>
+      <td>
+        <strong>Cross-Machine Topic Echo.</strong>
+        From your laptop (not SSHed into the robot), run
+        <code>ros2 topic info /booster_video_stream</code>
+        and screenshot the output showing <em>Publisher count: 1</em>.
+        This proves your FastDDS config is working correctly.
+      </td>
+      <td class="task-pts">15</td>
     </tr>
     <tr>
       <td>2</td>
-      <td><strong>Record a Rosbag.</strong> Record a 10-second rosbag that includes the IMU and camera topics while the robot is standing still. Submit the output of <code>ros2 bag info</code> as a screenshot.</td>
-      <td class="task-pts">25</td>
+      <td>
+        <strong>rqt_graph Node Map.</strong>
+        Run <code>rqt_graph</code> with <em>Nodes/Topics (all)</em> selected.
+        Screenshot the graph and annotate it (in any image editor or by hand):
+        circle 3 nodes, draw arrows for their data flow, and label the topic
+        connecting each pair.
+      </td>
+      <td class="task-pts">15</td>
     </tr>
     <tr>
       <td>3</td>
-      <td><strong>Node Graph.</strong> Run <code>rqt_graph</code> while the robot stack is running. Draw or screenshot the resulting node/topic graph and label the publisher and subscriber for at least 3 topics.</td>
+      <td>
+        <strong>Live Data Challenge.</strong>
+        Complete all 5 challenges from Section 5. For each, write:
+        (a) the exact topic name you found, (b) the relevant field name,
+        (c) a sample value. Submit as a table or numbered list.
+        No credit for guesses — must show actual <code>ros2 topic echo</code> output.
+      </td>
       <td class="task-pts">25</td>
     </tr>
     <tr>
       <td>4</td>
-      <td><strong>DDS vs WiFi Explanation.</strong> In 200–300 words, explain why DDS discovery fails on a direct Ethernet cable without the XML peer file, and what the XML file does to fix it. Include a simple diagram.</td>
-      <td class="task-pts">25</td>
+      <td>
+        <strong>head_reporter.py.</strong>
+        Run <code>head_reporter.py</code> and physically move the robot's head
+        through at least 4 distinct positions (LEFT, RIGHT, UP, DOWN).
+        Screenshot the terminal output showing all 4 direction changes.
+        Bonus (+5 pts): add a NORTH/SOUTH/EAST/WEST compass-style output.
+      </td>
+      <td class="task-pts">20</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>
+        <strong>Break It On Purpose.</strong>
+        Reproduce all three failure modes from Section 7:
+        wrong domain ID, missing XML file, and (if you can trigger it)
+        a QoS mismatch. For each: screenshot the broken state
+        (<code>ros2 topic list</code> showing empty or wrong output) and the
+        fixed state. Write one sentence explaining <em>why</em> each failure happens.
+      </td>
+      <td class="task-pts">15</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>
+        <strong>Record a Rosbag.</strong>
+        Record a 10-second bag containing at least the IMU and camera topics
+        while the robot is standing still. Submit the output of
+        <code>ros2 bag info</code> showing the topic list, message counts,
+        and total duration.
+      </td>
+      <td class="task-pts">10</td>
     </tr>
     <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
       <td colspan="2">Total</td>
