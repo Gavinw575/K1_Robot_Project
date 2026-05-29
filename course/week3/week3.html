@@ -204,6 +204,113 @@
 </div>
 
 <!-- =========================================================== -->
+<h2>5. Setting Up the Robot Model in RViz2</h2>
+
+<p>
+  The K1 URDF file lives on the robot at
+  <code>/opt/booster/Gait/configs/K1/robot.urdf</code>. It references mesh
+  files using absolute paths that point to the robot's filesystem. Before
+  RViz2 on your laptop can render the model, you need to copy both the URDF
+  and the mesh files locally, then rewrite the paths to match your machine.
+</p>
+
+<h3>Step 1 — Copy URDF and Meshes from Robot to Laptop</h3>
+
+<p>Run these commands on your <strong>laptop</strong> (not the robot):</p>
+
+<pre><span class="cm"># Create local directories</span>
+<span class="fn">mkdir</span> -p ~/robots/k1/workspace/src/k1_description/urdf
+<span class="fn">mkdir</span> -p ~/k1_robot/meshes
+
+<span class="cm"># Copy the URDF file from the robot</span>
+<span class="fn">sshpass</span> -p <span class="st">"123456"</span> scp \
+    booster@<span class="num">192.168.10.102</span>:/opt/booster/Gait/configs/K1/robot.urdf \
+    ~/robots/k1/workspace/src/k1_description/urdf/
+
+<span class="cm"># Copy the mesh files from the robot</span>
+<span class="fn">sshpass</span> -p <span class="st">"123456"</span> scp -r \
+    booster@<span class="num">192.168.10.102</span>:/opt/booster/Gait/configs/K1/K1_meshes \
+    ~/k1_robot/meshes/</pre>
+
+<div class="tip-box">
+  <strong>sshpass not installed?</strong> Run <code>sudo apt install sshpass</code>,
+  or just omit <code>sshpass -p "123456"</code> and type the password manually
+  when prompted.
+</div>
+
+<h3>Step 2 — Fix Mesh Paths in the URDF</h3>
+
+<p>
+  The URDF hard-codes paths like
+  <code>/opt/booster/Gait/configs/K1/K1_meshes/...</code>.
+  Replace them with the path on your laptop:
+</p>
+
+<pre><span class="cm"># Replace YOUR_USERNAME with your actual Linux username (run: whoami)</span>
+<span class="fn">sed</span> -i <span class="st">'s|/opt/booster/Gait/configs/K1/K1_meshes/|/home/YOUR_USERNAME/k1_robot/meshes/K1_meshes/|g'</span> \
+    ~/robots/k1/workspace/src/k1_description/urdf/robot.urdf
+
+<span class="cm"># Verify the replacement worked — should show your home path, not /opt/booster</span>
+<span class="fn">grep</span> -m 3 <span class="st">"filename="</span> ~/robots/k1/workspace/src/k1_description/urdf/robot.urdf</pre>
+
+<div class="warning-box">
+  <strong>&#9888; Replace YOUR_USERNAME</strong> — substitute your real username
+  in the <code>sed</code> command above. Find it by running <code>whoami</code>
+  in a terminal. If you leave it as <code>YOUR_USERNAME</code> the meshes will
+  not load and the robot will appear as a white skeleton in RViz2.
+</div>
+
+<h3>Step 3 — Launch robot_state_publisher</h3>
+
+<p>Open a terminal and run:</p>
+
+<pre><span class="fn">ros2</span> run robot_state_publisher robot_state_publisher --ros-args \
+  -p robot_description:=<span class="st">"$(cat ~/robots/k1/workspace/src/k1_description/urdf/robot.urdf)"</span></pre>
+
+<p>
+  You will see several lines of output. Two warnings are completely
+  harmless and can be ignored:
+</p>
+
+<div class="tip-box">
+  <strong>Warning: FastDDS XML profile not found</strong><br>
+  This appears when the <code>FASTRTPS_DEFAULT_PROFILES_FILE</code> environment
+  variable is set but robot_state_publisher is running without an active DDS
+  peer. It does not affect URDF loading or RViz2 rendering — ignore it.
+</div>
+
+<div class="tip-box">
+  <strong>Warning: The root link trunk_link has an inertia specified...</strong><br>
+  KDL (the kinematics library) prints this when the root link of a floating-base
+  robot has inertial properties defined. It is informational only — the robot
+  model will still load and display correctly in RViz2.
+</div>
+
+<h3>Step 4 — Open RViz2 and Add the Robot Model</h3>
+
+<p>In a <strong>second terminal</strong>:</p>
+
+<pre><span class="fn">rviz2</span></pre>
+
+<div class="steps">
+  <ol>
+    <li>In the <em>Global Options</em> panel (top-left), set <strong>Fixed Frame</strong> to <code>trunk_link</code>.</li>
+    <li>Click <strong>Add</strong> &rarr; <em>By display type</em> &rarr; <strong>RobotModel</strong>.</li>
+    <li>In the RobotModel row, set <em>Description Topic</em> to <code>/robot_description</code>.</li>
+    <li>Click <strong>Add</strong> &rarr; <strong>TF</strong> to overlay all coordinate frames.</li>
+    <li>The K1 model should appear in the viewport. If meshes are pink/missing, recheck Step 2.</li>
+    <li>Save the config: <em>File &rarr; Save Config As</em> &rarr; <code>~/robots/k1/config/k1.rviz</code></li>
+  </ol>
+</div>
+
+<div class="screenshot">
+  <div class="ss-label">[Screenshot Placeholder]</div>
+  <div class="ss-caption">RViz2 displaying the full K1 robot model loaded from the local
+    URDF, with coloured meshes on all links, trunk_link as the fixed frame,
+    and the TF tree overlaid. robot_state_publisher terminal visible in background.</div>
+</div>
+
+<!-- =========================================================== -->
 <div class="tasks-section">
   <h2>Tasks — Week 3 (100 points total)</h2>
   <table>
@@ -228,9 +335,14 @@
       <td><strong>URDF Joint Types.</strong> Find all joint types used in the K1 URDF file and list how many of each type exist (revolute, fixed, etc.). Write 2–3 sentences explaining why the waist uses a different joint type than the fingers.</td>
       <td class="task-pts">25</td>
     </tr>
+    <tr>
+      <td>5</td>
+      <td><strong>Robot Model Display.</strong> Follow the Section 5 steps to copy the URDF and meshes from the robot, fix the mesh paths, and launch robot_state_publisher. Get the full K1 robot model displaying in RViz2 with coloured meshes on all links. Take a screenshot showing the complete robot from the front with the Fixed Frame set to <code>trunk_link</code>.</td>
+      <td class="task-pts">25</td>
+    </tr>
     <tr style="background-color:rgb(210,150,80);color:#fff;font-weight:bold;">
       <td colspan="2">Total</td>
-      <td class="task-pts" style="color:#fff;">100</td>
+      <td class="task-pts" style="color:#fff;">125</td>
     </tr>
   </table>
 </div>
